@@ -30,6 +30,8 @@ class CameraStreamingService : LifecycleService() {
     private var provider: ProcessCameraProvider? = null
     @Volatile private var activeCamera: Camera? = null
     @Volatile private var torchEnabled = false
+    @Volatile private var jpegQuality = 85
+    @Volatile private var resolutionIndex = 2
     private var lensFacing = CameraSelector.LENS_FACING_BACK
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -81,6 +83,14 @@ class CameraStreamingService : LifecycleService() {
     }
 
     private fun startCamera() {
+        val sizes = arrayOf(
+            android.util.Size(640, 480),
+            android.util.Size(1280, 720),
+            android.util.Size(1920, 1080),
+            android.util.Size(2560, 1440),
+            android.util.Size(3840, 2160)
+        )
+        val targetSize = sizes[resolutionIndex.coerceIn(0, sizes.lastIndex)]
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
@@ -88,7 +98,7 @@ class CameraStreamingService : LifecycleService() {
                 provider = cameraProvider
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setTargetResolution(android.util.Size(640, 480))
+                    .setTargetResolution(targetSize)
                     .build()
                 analysis.setAnalyzer(cameraExecutor) { image ->
                     try { latestJpeg.set(imageToJpeg(image)) } catch (_: Exception) { } finally { image.close() }
@@ -125,6 +135,18 @@ class CameraStreamingService : LifecycleService() {
                 camera.cameraControl.setZoomRatio(zoom)
                 "Zoom set to %.1fx".format(zoom)
             }
+            "quality" -> {
+                val requested = value?.toIntOrNull() ?: return "Invalid quality setting"
+                resolutionIndex = requested.coerceIn(0, 4)
+                ContextCompat.getMainExecutor(this).execute { startCamera() }
+                val labels = arrayOf("480p", "720p", "1080p", "1440p / 2K", "2160p / 4K")
+                "Requested ${labels[resolutionIndex]}. Actual resolution depends on camera support."
+            }
+            "jpeg" -> {
+                val requested = value?.toIntOrNull() ?: return "Invalid JPEG quality"
+                jpegQuality = requested.coerceIn(50, 95)
+                "JPEG quality set to $jpegQuality%"
+            }
             else -> "Unknown command"
         }
     }
@@ -146,7 +168,7 @@ class CameraStreamingService : LifecycleService() {
             nv21[pos++] = u.get(row * up.rowStride + col * up.pixelStride)
         }
         val output = ByteArrayOutputStream()
-        YuvImage(nv21, ImageFormat.NV21, width, height, null).compressToJpeg(Rect(0, 0, width, height), 65, output)
+        YuvImage(nv21, ImageFormat.NV21, width, height, null).compressToJpeg(Rect(0, 0, width, height), jpegQuality, output)
         return output.toByteArray()
     }
 
