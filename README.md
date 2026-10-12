@@ -10,7 +10,7 @@ CamLink is an Android camera-sharing prototype. A camera phone can stream to the
 - Android viewer: enter the camera phone's local IP address.
 - GitHub Actions builds a debug APK automatically.
 
-The viewer refreshes JPEG frames; this is not yet a smooth, low-latency video call. Keep the camera phone awake and CamLink open while sharing.
+The viewer refreshes JPEG frames; this is not yet a smooth, low-latency video call. CamLink uses a camera foreground service with an ongoing notification so the stream can continue when you switch apps or lock the screen. Android may still stop it due to battery restrictions, force-stop, or manufacturer-specific background limits.
 
 ## Build the APK
 
@@ -35,6 +35,6 @@ If the page does not load, check that both devices are on the same network, the 
 
 - The web page is hosted on the camera phone; no cloud server is required.
 - V1 has no pairing code or encryption. Anyone who can reach port 8080 on that local network may be able to view the camera while sharing is active. Use only on a trusted network; do not expose or port-forward this port to the internet.
-- Camera permission is required. The camera phone should visibly remain in the CamLink app while sharing.
+- Camera permission is required. The camera phone must grant camera permission and show the ongoing foreground-service notification while sharing. You can switch apps or lock the screen, but Android battery policies may still stop the service.
 - This is a development build, not a production-ready security-reviewed app.
 - Secure pairing, HTTPS/authentication, hotspot improvements, remote controls, and smoother video are planned for later versions.
