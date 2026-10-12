@@ -52,6 +52,17 @@ class CameraStreamingService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if (intent?.action == ACTION_CONTROL) {
+            val command = intent.getStringExtra(EXTRA_CONTROL_COMMAND).orEmpty()
+            val value = intent.getStringExtra(EXTRA_CONTROL_VALUE)
+            val message = if (server == null) {
+                "Camera sharing is not active yet"
+            } else {
+                handleWebControl(command, value)
+            }
+            sendBroadcast(Intent(ACTION_CONTROL_RESULT).setPackage(packageName).putExtra(EXTRA_CONTROL_RESULT_TEXT, message))
+            return START_STICKY
+        }
         if (intent?.action == ACTION_SWITCH) {
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
             startCamera()
@@ -119,7 +130,15 @@ class CameraStreamingService : LifecycleService() {
                     .setTargetResolution(targetSize)
                     .build()
                 analysis.setAnalyzer(cameraExecutor) { image ->
-                    try { latestJpeg.set(imageToJpeg(image)) } catch (_: Exception) { } finally { image.close() }
+                    val startedNs = System.nanoTime()
+                    try {
+                        val jpeg = imageToJpeg(image)
+                        latestJpeg.set(jpeg)
+                        updateStreamMetrics(jpeg.size, System.nanoTime() - startedNs)
+                    } catch (_: Exception) {
+                    } finally {
+                        image.close()
+                    }
                 }
                 cameraProvider.unbindAll()
                 val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
@@ -337,17 +356,61 @@ class CameraStreamingService : LifecycleService() {
         return destination
     }
 
+    private var statsWindowStartedNs = System.nanoTime()
+    private var statsWindowFrames = 0L
+    private var statsWindowBytes = 0L
+
+    private fun updateStreamMetrics(jpegBytes: Int, encodeNanos: Long) {
+        streamEncodeMs = encodeNanos / 1_000_000.0
+        streamFrameWidth = captureWidth
+        streamFrameHeight = captureHeight
+        streamJpegQuality = jpegQuality
+        statsWindowFrames++
+        statsWindowBytes += jpegBytes
+        val now = System.nanoTime()
+        val elapsedNs = now - statsWindowStartedNs
+        if (elapsedNs >= 1_000_000_000L) {
+            streamFps = statsWindowFrames * 1_000_000_000.0 / elapsedNs
+            streamBitrateMbps = statsWindowBytes * 8_000.0 / elapsedNs
+            statsWindowFrames = 0L
+            statsWindowBytes = 0L
+            statsWindowStartedNs = now
+        }
+    }
+
     override fun onDestroy() {
         try { provider?.unbindAll() } catch (_: Exception) { }
         activeCamera = null
         try { server?.stop() } catch (_: Exception) { }
         cameraExecutor.shutdown()
         latestJpeg.set(null)
+        streamFps = 0.0
+        streamEncodeMs = 0.0
+        streamBitrateMbps = 0.0
+        streamFrameWidth = 0
+        streamFrameHeight = 0
         super.onDestroy()
     }
 
     companion object {
         const val ACTION_SWITCH = "com.intersprit.camlink.SWITCH_CAMERA"
+        const val ACTION_CONTROL = "com.intersprit.camlink.CONTROL_CAMERA"
+        const val ACTION_CONTROL_RESULT = "com.intersprit.camlink.CONTROL_CAMERA_RESULT"
+        const val EXTRA_CONTROL_COMMAND = "com.intersprit.camlink.EXTRA_CONTROL_COMMAND"
+        const val EXTRA_CONTROL_VALUE = "com.intersprit.camlink.EXTRA_CONTROL_VALUE"
+        const val EXTRA_CONTROL_RESULT_TEXT = "com.intersprit.camlink.EXTRA_CONTROL_RESULT_TEXT"
+        @Volatile var streamFps: Double = 0.0
+        @Volatile var streamEncodeMs: Double = 0.0
+        @Volatile var streamBitrateMbps: Double = 0.0
+        @Volatile var streamFrameWidth: Int = 0
+        @Volatile var streamFrameHeight: Int = 0
+        @Volatile var streamJpegQuality: Int = 75
+        fun statsJsonForViewer(): String = String.format(
+            java.util.Locale.US,
+            "{\"fps\":%.1f,\"encodeMs\":%.2f,\"bitrateMbps\":%.2f,\"width\":%d,\"height\":%d,\"jpegQuality\":%d}",
+            streamFps, streamEncodeMs, streamBitrateMbps,
+            streamFrameWidth, streamFrameHeight, streamJpegQuality
+        )
         private const val NOTIFICATION_ID = 812
     }
 }
