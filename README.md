@@ -6,11 +6,13 @@ CamLink is an Android camera-sharing prototype. A camera phone can stream to the
 
 - CameraX live preview and JPEG frame endpoint on port 8080.
 - Front/rear camera toggle.
-- **Local website:** when camera sharing is running, open `http://CAMERA_PHONE_IP:8080/` in any device browser on the same local network. The page includes remote front/rear switching, flashlight toggle, and zoom slider (where supported).
+- Selectable capture target: 480p, 720p, 1080p, 1440p/2K, or 2160p/4K where supported.
+- Adjustable JPEG quality from 50–95%.
+- **Local website:** when camera sharing is running, open `http://CAMERA_PHONE_IP:8080/` in any device browser on the same local network. The page includes remote front/rear switching, flashlight toggle, zoom, resolution selection, and JPEG quality controls (where supported).
 - Android viewer: enter the camera phone's local IP address.
 - GitHub Actions builds a debug APK automatically.
 
-The viewer refreshes JPEG frames; this is not yet a smooth, low-latency video call. CamLink uses a camera foreground service with an ongoing notification so the stream can continue when you switch apps or lock the screen. Android may still stop it due to battery restrictions, force-stop, or manufacturer-specific background limits.
+The viewer refreshes JPEG frames; this is not yet a smooth, low-latency video call. Resolution options are target requests only: Android CameraX and the specific phone camera may choose a lower supported resolution, and 4K is not guaranteed. Higher resolutions increase processing load, network use, and latency. CamLink uses a camera foreground service with an ongoing notification so the stream can continue when you switch apps or lock the screen. Android may still stop it due to battery restrictions, force-stop, or manufacturer-specific background limits.
 
 ## Build the APK
 
