@@ -1,23 +1,32 @@
 package com.intersprit.camlink
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.format.Formatter
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ArrayAdapter
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -47,6 +56,21 @@ class MainActivity : ComponentActivity() {
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var cameraProvider: ProcessCameraProvider? = null
     private var hosting = false
+    private var hostStatusView: TextView? = null
+    private var hostMetricsView: TextView? = null
+    private var hostControlStatusView: TextView? = null
+    private var hostResolutionSpinner: Spinner? = null
+    private var hostJpegSeekBar: SeekBar? = null
+    private var hostJpegLabel: TextView? = null
+    private val metricsHandler = Handler(Looper.getMainLooper())
+    private var metricsRunnable: Runnable? = null
+    private var controlReceiverRegistered = false
+    private val controlResultReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            hostControlStatusView?.text = intent?.getStringExtra(CameraStreamingService.EXTRA_CONTROL_RESULT_TEXT)
+                ?: "Control request completed"
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,18 +116,21 @@ class MainActivity : ComponentActivity() {
 
     private fun showHost() {
         stopHost()
-        baseLayout("Camera phone", "Your camera stays on this device. Start sharing when you're ready.")
+        baseLayout("Camera phone", "Camera sharing and performance controls")
+        makeRootScrollable()
         previewView = PreviewView(this).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
-        root.addView(previewView, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(previewView, LinearLayout.LayoutParams(-1, dp(170)))
         val status = TextView(this).apply {
             text = "Camera sharing is off."
-            textSize = 15f
+            textSize = 14f
             setTextColor(0xFF8FE3D0.toInt())
-            setPadding(0, dp(12), 0, dp(8))
+            setPadding(0, dp(8), 0, dp(6))
         }
+        hostStatusView = status
         root.addView(status)
+
         addButton("Start camera sharing") {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
@@ -112,16 +139,172 @@ class MainActivity : ComponentActivity() {
                 startHost(status)
             }
         }
-        addButton("Switch front / rear camera") {
-            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-            if (hosting) startService(Intent(this, CameraStreamingService::class.java).setAction(CameraStreamingService.ACTION_SWITCH))
+
+        addButton("⚡ MAX FPS / Low Latency preset") { applyHostPerformancePreset() }
+        addHostCameraControls()
+
+        val metrics = TextView(this).apply {
+            text = "Waiting for camera metrics…"
+            textSize = 12f
+            setTextColor(0xFFB9C3DC.toInt())
+            setPadding(0, dp(8), 0, dp(4))
         }
+        hostMetricsView = metrics
+        root.addView(metrics)
+        val result = TextView(this).apply {
+            text = "Controls will report their result here."
+            textSize = 12f
+            setTextColor(0xFF8FE3D0.toInt())
+            setPadding(0, dp(2), 0, dp(8))
+        }
+        hostControlStatusView = result
+        root.addView(result)
+
         addButton("Stop sharing") {
             stopHost()
             status.text = "Camera sharing is off."
+            metrics.text = "Camera sharing stopped."
         }
         addButton("← Back") { showHome() }
-        // Camera capture is owned by the foreground service so streaming can continue when this screen is backgrounded.
+    }
+
+    private fun makeRootScrollable() {
+        (root.parent as? ViewGroup)?.removeView(root)
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        scroll.addView(root, ScrollView.LayoutParams(-1, -2))
+        setContentView(scroll)
+    }
+
+    private fun addHostCameraControls() {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        hostResolutionSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                arrayOf("480p", "720p · MAX", "1080p", "1440p / 2K", "2160p / 4K")
+            )
+            setSelection(1)
+        }
+        row.addView(hostResolutionSpinner, LinearLayout.LayoutParams(0, dp(48), 1f))
+        val applyResolution = Button(this).apply {
+            text = "Apply"
+            isAllCaps = false
+            setOnClickListener {
+                if (!hosting) {
+                    hostControlStatusView?.text = "Start camera sharing before changing capture settings."
+                } else {
+                    sendHostControl("quality", (hostResolutionSpinner?.selectedItemPosition ?: 1).toString())
+                }
+            }
+        }
+        row.addView(applyResolution, LinearLayout.LayoutParams(dp(94), dp(44)))
+        root.addView(row)
+
+        val qualityRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        hostJpegLabel = TextView(this).apply {
+            text = "JPEG 75%"
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+        }
+        qualityRow.addView(hostJpegLabel, LinearLayout.LayoutParams(dp(78), -2))
+        hostJpegSeekBar = SeekBar(this).apply {
+            max = 9
+            progress = 5 // JPEG quality 75 on the 50..95 scale, steps of five.
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    hostJpegLabel?.text = "JPEG ${50 + progress * 5}%"
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            })
+        }
+        qualityRow.addView(hostJpegSeekBar, LinearLayout.LayoutParams(0, dp(44), 1f))
+        root.addView(qualityRow)
+        addButton("Apply JPEG quality") {
+            if (!hosting) {
+                hostControlStatusView?.text = "Start camera sharing before changing JPEG quality."
+            } else {
+                val value = 50 + (hostJpegSeekBar?.progress ?: 5) * 5
+                sendHostControl("jpeg", value.toString())
+            }
+        }
+
+        val quickRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        quickRow.addView(compactButton("Flip", dp(0)) { sendHostControl("switch") }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        quickRow.addView(compactButton("Flash", dp(0)) { sendHostControl("torch") }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        quickRow.addView(compactButton("Focus", dp(0)) { sendHostControl("focus") }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        root.addView(quickRow)
+    }
+
+    private fun compactButton(label: String, ignoredWidth: Int, action: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            isAllCaps = false
+            setOnClickListener { if (hosting) action() else hostControlStatusView?.text = "Start camera sharing first." }
+        }
+
+    private fun applyHostPerformancePreset() {
+        hostResolutionSpinner?.setSelection(1)
+        hostJpegSeekBar?.progress = 5
+        if (!hosting) {
+            hostControlStatusView?.text = "MAX preset selected. Start sharing to apply 720p / JPEG quality 75."
+            return
+        }
+        sendHostControl("quality", "1")
+        metricsHandler.postDelayed({ sendHostControl("jpeg", "75") }, 180)
+    }
+
+    private fun sendHostControl(command: String, value: String? = null) {
+        if (!hosting) {
+            hostControlStatusView?.text = "Start camera sharing first."
+            return
+        }
+        val intent = Intent(this, CameraStreamingService::class.java)
+            .setAction(CameraStreamingService.ACTION_CONTROL)
+            .putExtra(CameraStreamingService.EXTRA_CONTROL_COMMAND, command)
+        if (value != null) intent.putExtra(CameraStreamingService.EXTRA_CONTROL_VALUE, value)
+        try {
+            startService(intent)
+            hostControlStatusView?.text = "Sending $command…"
+        } catch (e: Exception) {
+            hostControlStatusView?.text = "Could not send $command: ${e.message ?: "unknown error"}"
+        }
+    }
+
+    private fun startHostMetrics() {
+        metricsRunnable?.let { metricsHandler.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                val fps = CameraStreamingService.streamFps
+                val encodeMs = CameraStreamingService.streamEncodeMs
+                val mbps = CameraStreamingService.streamBitrateMbps
+                val width = CameraStreamingService.streamFrameWidth
+                val height = CameraStreamingService.streamFrameHeight
+                val quality = CameraStreamingService.streamJpegQuality
+                hostMetricsView?.text = String.format(
+                    java.util.Locale.US,
+                    "Camera output: %.1f FPS · %.1f ms JPEG encode · %.2f Mbps · %dx%d · JPEG %d%%",
+                    fps, encodeMs, mbps, width, height, quality
+                )
+                if (hosting) metricsHandler.postDelayed(this, 1000)
+            }
+        }
+        metricsRunnable = runnable
+        metricsHandler.post(runnable)
+    }
+
+    private fun stopHostMetrics() {
+        metricsRunnable?.let { metricsHandler.removeCallbacks(it) }
+        metricsRunnable = null
     }
 
     private fun startHost(status: TextView) {
@@ -132,6 +315,8 @@ class MainActivity : ComponentActivity() {
             hosting = true
             val ip = localIpAddress()
             status.text = "LIVE • http://$ip:8080\nStreaming continues in the background."
+            hostControlStatusView?.text = "MAX defaults: 720p · JPEG 75% · prefer 60 FPS when supported."
+            startHostMetrics()
             Toast.makeText(this, "Background camera sharing started", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             status.text = "Could not start sharing: ${e.message ?: "unknown error"}"
@@ -297,6 +482,7 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
     }
 
     private fun stopHost() {
+        stopHostMetrics()
         try { cameraProvider?.unbindAll() } catch (_: Exception) { }
         cameraProvider = null
         try { stopService(Intent(this, CameraStreamingService::class.java)) } catch (_: Exception) { }
@@ -308,8 +494,31 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
+    override fun onStart() {
+        super.onStart()
+        if (!controlReceiverRegistered) {
+            ContextCompat.registerReceiver(
+                this,
+                controlResultReceiver,
+                IntentFilter(CameraStreamingService.ACTION_CONTROL_RESULT),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            controlReceiverRegistered = true
+        }
+    }
+
+    override fun onStop() {
+        if (controlReceiverRegistered) {
+            try { unregisterReceiver(controlResultReceiver) } catch (_: Exception) { }
+            controlReceiverRegistered = false
+        }
+        stopHostMetrics()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         // Do not stop CameraStreamingService here: it is designed to outlive this Activity.
+        stopHostMetrics()
         try { cameraProvider?.unbindAll() } catch (_: Exception) { }
         webView?.destroy()
         cameraExecutor.shutdown()
