@@ -355,7 +355,7 @@ const jpeg=document.getElementById('jpeg'),jpegLabel=document.getElementById('jp
 jpeg.addEventListener('input',()=>{jpegLabel.textContent=jpeg.value+'%';});
 jpeg.addEventListener('change',()=>command('jpeg',jpeg.value));
 document.getElementById('refresh').addEventListener('click',()=>{failures=0;poll();});
-poll();timer=setInterval(poll,60);
+poll();timer=setInterval(poll,10);
 </script>
 </main></body></html>
 """.trimIndent()
