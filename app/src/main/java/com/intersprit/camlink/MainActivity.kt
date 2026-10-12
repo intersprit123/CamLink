@@ -2,6 +2,7 @@ package com.intersprit.camlink
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.Rect
