@@ -296,8 +296,10 @@ fun viewerPage() = """
 <title>CamLink Live Camera</title>
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#f4f6ff;background:#101525}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:18px}
-main{width:min(100%,900px)}h1{margin:0;font-size:clamp(1.6rem,5vw,2.3rem)}.muted{color:#b9c3dc}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:18px;background:radial-gradient(ellipse at top left,#1a2850 0%,#101525 48%,#0b1020 100%)}
+main{width:min(100%,1400px)}h1{margin:0;font-size:clamp(1.6rem,5vw,2.3rem)}.muted{color:#b9c3dc}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}.feed-column{min-width:0}.controls{margin-top:0;position:sticky;top:14px;padding:18px;background:linear-gradient(160deg,#19243b,#121a2d);border:1px solid #344363;border-radius:18px;box-shadow:0 18px 50px #0004}.viewer{box-shadow:0 18px 50px #0005}.row button{min-width:0}button{transition:filter .15s ease,transform .15s ease}button:hover{filter:brightness(1.12)}button:active{transform:scale(.985)}
+@media(max-width:850px){.layout{grid-template-columns:1fr}.controls{position:static}.viewer{min-height:180px}}
 header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .badge{background:#173b38;color:#8fe3d0;border-radius:999px;padding:7px 11px;font-size:.85rem}
 .viewer{background:#05070d;border:1px solid #29324b;border-radius:16px;overflow:hidden;min-height:220px;display:grid;place-items:center}
@@ -313,7 +315,8 @@ select{width:100%;padding:10px;border-radius:9px;background:#202a42;color:#f4f6f
 </head>
 <body><main>
 <header><div><h1>CamLink</h1><div class="muted">Local network camera viewer</div></div><span id="badge" class="badge">Connecting…</span></header>
-<div class="viewer"><div id="placeholder">Waiting for camera frames…<br>Keep CamLink open on the camera phone.</div><img id="feed" alt="Live camera feed" hidden></div>
+<div class="layout"><div class="feed-column"><div class="viewer"><div id="placeholder">Waiting for camera frames…<br>Keep CamLink open on the camera phone.</div><img id="feed" alt="Live camera feed" hidden></div>
+<footer><span id="status" class="muted">Connecting to camera stream…</span></footer></div>
 <section class="controls" aria-label="Remote camera controls">
 <div class="row"><button id="switch" type="button">Switch front / rear</button><button id="torch" type="button">Flashlight on / off</button></div>
 <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label>
@@ -325,7 +328,7 @@ select{width:100%;padding:10px;border-radius:9px;background:#202a42;color:#f4f6f
 <div class="row"><button id="refresh" type="button">Reconnect</button></div>
 <p id="controlStatus" class="muted" aria-live="polite">Controls affect the camera phone.</p>
 </section>
-<footer><span id="status" class="muted">Connecting to camera stream…</span></footer>
+</div>
 <p class="muted">Remote controls work on supported cameras. This local page is unauthenticated; use only on a trusted network.</p>
 <script>
 const feed=document.getElementById('feed'),placeholder=document.getElementById('placeholder'),status=document.getElementById('status'),badge=document.getElementById('badge');
@@ -355,7 +358,7 @@ const jpeg=document.getElementById('jpeg'),jpegLabel=document.getElementById('jp
 jpeg.addEventListener('input',()=>{jpegLabel.textContent=jpeg.value+'%';});
 jpeg.addEventListener('change',()=>command('jpeg',jpeg.value));
 document.getElementById('refresh').addEventListener('click',()=>{failures=0;poll();});
-poll();timer=setInterval(poll,10);
+poll();timer=setInterval(poll,20);
 </script>
 </main></body></html>
 """.trimIndent()
