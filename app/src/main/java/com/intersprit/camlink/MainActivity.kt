@@ -30,6 +30,8 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.IOException
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.Executors
@@ -226,11 +228,10 @@ class MainActivity : ComponentActivity() {
         <style>body{margin:0;background:#101525;color:#fff;font:16px sans-serif;text-align:center}
         h3{font-size:18px}img{width:100%;max-height:75vh;object-fit:contain;background:#000}
         p{color:#b9c3dc}</style></head><body><h3>CamLink · Live view</h3>
-        <img id="feed" alt="Waiting for camera frames…"><p id="state">Connecting…</p>
+        <img id="feed" src="http://$host:8080/stream" alt="Waiting for camera frames…"><p id="state">Connecting to continuous stream…</p>
         <script>const feed=document.getElementById('feed'),state=document.getElementById('state');
-        function refresh(){const i=new Image();i.onload=()=>{feed.src=i.src;state.textContent='Connected · live frames'};
-        i.onerror=()=>{state.textContent='Waiting for camera phone… check IP and Wi-Fi'};
-        i.src='http://$host:8080/frame?t='+Date.now();} refresh();setInterval(refresh,180);</script></body></html>
+        feed.onload=()=>state.textContent='Connected · continuous live stream';
+        feed.onerror=()=>state.textContent='Waiting for camera phone… check IP and Wi-Fi';</script></body></html>
     """.trimIndent()
 
     private fun addButton(label: String, action: () -> Unit) {
@@ -363,8 +364,54 @@ class FrameServer(
     private val latestFrame: AtomicReference<ByteArray?>,
     private val controlHandler: ((String, String?) -> String)? = null
 ) : NanoHTTPD("0.0.0.0", 8080) {
+    private fun mjpegStream(): InputStream = object : InputStream() {
+        @Volatile private var closed = false
+        private var pending = ByteArray(0)
+        private var offset = 0
+        private var previousFrame: ByteArray? = null
+
+        override fun read(): Int {
+            val one = ByteArray(1)
+            val count = read(one, 0, 1)
+            return if (count < 0) -1 else one[0].toInt() and 0xff
+        }
+
+        override fun read(buffer: ByteArray, off: Int, len: Int): Int {
+            if (closed) return -1
+            if (len == 0) return 0
+            while (offset >= pending.size) {
+                var frame: ByteArray?
+                do {
+                    if (closed) return -1
+                    frame = latestFrame.get()
+                    if (frame == null || frame === previousFrame) {
+                        try { Thread.sleep(5) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return -1 }
+                    }
+                } while (frame == null || frame === previousFrame)
+                previousFrame = frame
+                val header = "--frame\\r\\nContent-Type: image/jpeg\\r\\nContent-Length: ${frame.size}\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII)
+                pending = header + frame + "\\r\\n".toByteArray(Charsets.US_ASCII)
+                offset = 0
+            }
+            val count = minOf(len, pending.size - offset)
+            System.arraycopy(pending, offset, buffer, off, count)
+            offset += count
+            return count
+        }
+
+        override fun close() {
+            closed = true
+            super.close()
+        }
+    }
+
     override fun serve(session: IHTTPSession): Response {
         return when (session.uri) {
+            "/stream" -> newChunkedResponse(Response.Status.OK, "multipart/x-mixed-replace; boundary=frame", mjpegStream()).apply {
+                addHeader("Cache-Control", "no-store, no-cache, must-revalidate")
+                addHeader("Access-Control-Allow-Origin", "*")
+                addHeader("Connection", "close")
+            }
             "/control" -> {
                 val params = session.parameters
                 val command = params["cmd"]?.firstOrNull().orEmpty()
