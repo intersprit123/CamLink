@@ -307,6 +307,7 @@ button{background:#315cff;color:white;border:0;border-radius:10px;padding:11px 1
 .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.row button{flex:1}
 label{display:flex;justify-content:space-between;margin:8px 0}
 input[type=range]{width:100%;accent-color:#315cff}
+select{width:100%;padding:10px;border-radius:9px;background:#202a42;color:#f4f6ff;border:1px solid #394663;margin:4px 0 12px}
 </style>
 </head>
 <body><main>
@@ -316,6 +317,10 @@ input[type=range]{width:100%;accent-color:#315cff}
 <div class="row"><button id="switch" type="button">Switch front / rear</button><button id="torch" type="button">Flashlight on / off</button></div>
 <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label>
 <input id="zoom" type="range" min="1" max="4" step="0.1" value="1">
+<label for="resolution">Capture resolution</label>
+<select id="resolution"><option value="0">480p · compatibility</option><option value="1">720p · HD</option><option value="2" selected>1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K (if supported)</option></select>
+<label for="jpeg">JPEG quality <strong id="jpegLabel">85%</strong></label>
+<input id="jpeg" type="range" min="50" max="95" step="5" value="85">
 <div class="row"><button id="refresh" type="button">Reconnect</button></div>
 <p id="controlStatus" class="muted" aria-live="polite">Controls affect the camera phone.</p>
 </section>
@@ -343,6 +348,11 @@ document.getElementById('torch').addEventListener('click',()=>command('torch'));
 const zoom=document.getElementById('zoom'),zoomLabel=document.getElementById('zoomLabel');
 zoom.addEventListener('input',()=>{zoomLabel.textContent=Number(zoom.value).toFixed(1)+'×';});
 zoom.addEventListener('change',()=>command('zoom',zoom.value));
+const resolution=document.getElementById('resolution');
+resolution.addEventListener('change',()=>command('quality',resolution.value));
+const jpeg=document.getElementById('jpeg'),jpegLabel=document.getElementById('jpegLabel');
+jpeg.addEventListener('input',()=>{jpegLabel.textContent=jpeg.value+'%';});
+jpeg.addEventListener('change',()=>command('jpeg',jpeg.value));
 document.getElementById('refresh').addEventListener('click',()=>{failures=0;poll();});
 poll();timer=setInterval(poll,180);
 </script>
