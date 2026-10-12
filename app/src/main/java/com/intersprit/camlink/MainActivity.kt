@@ -273,7 +273,8 @@ class MainActivity : ComponentActivity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
-        stopHost()
+        // Do not stop CameraStreamingService here: it is designed to outlive this Activity.
+        try { cameraProvider?.unbindAll() } catch (_: Exception) { }
         webView?.destroy()
         cameraExecutor.shutdown()
         super.onDestroy()
