@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.ImageFormat
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.os.Build
@@ -169,7 +171,20 @@ class CameraStreamingService : LifecycleService() {
         }
         val output = ByteArrayOutputStream()
         YuvImage(nv21, ImageFormat.NV21, width, height, null).compressToJpeg(Rect(0, 0, width, height), jpegQuality, output)
-        return output.toByteArray()
+        val jpeg = output.toByteArray()
+        val rotation = image.imageInfo.rotationDegrees
+        if (rotation == 0) return jpeg
+
+        // ImageAnalysis buffers can be landscape even when the phone is held vertically.
+        // Rotate each frame so viewers match the phone's current orientation.
+        val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return jpeg
+        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+        val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        val rotatedOutput = ByteArrayOutputStream()
+        rotated.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, rotatedOutput)
+        if (rotated !== bitmap) bitmap.recycle()
+        rotated.recycle()
+        return rotatedOutput.toByteArray()
     }
 
     override fun onDestroy() {
