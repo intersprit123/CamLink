@@ -295,26 +295,26 @@ fun viewerPage() = """
 <meta name="color-scheme" content="dark">
 <title>CamLink Live Camera</title>
 <style>
-:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#f4f6ff;background:#101525}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:18px;background:radial-gradient(ellipse at top left,#1a2850 0%,#101525 48%,#0b1020 100%)}
-main{width:min(100%,1400px)}h1{margin:0;font-size:clamp(1.6rem,5vw,2.3rem)}.muted{color:#b9c3dc}
-.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}.feed-column{min-width:0}.controls{margin-top:0;position:sticky;top:14px;padding:18px;background:linear-gradient(160deg,#19243b,#121a2d);border:1px solid #344363;border-radius:18px;box-shadow:0 18px 50px #0004}.viewer{box-shadow:0 18px 50px #0005}.row button{min-width:0}button{transition:filter .15s ease,transform .15s ease}button:hover{filter:brightness(1.12)}button:active{transform:scale(.985)}
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#f4f7fb;background:#0a0f1a;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:clamp(12px,2vw,28px);background:radial-gradient(ellipse at 12% 0%,#1b2a47 0%,#0d1422 48%,#080c14 100%)}
+main{width:min(100%,1500px)}h1{margin:0;font-size:clamp(1.7rem,4vw,2.45rem);letter-spacing:-.045em;font-weight:750}.muted{color:#a1aec2}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}.feed-column{min-width:0}.controls{margin-top:0;position:sticky;top:16px;padding:20px;background:linear-gradient(155deg,#151f30,#101724);border:1px solid #2b3b53;border-radius:20px;box-shadow:0 22px 60px #0005}.viewer{box-shadow:0 22px 60px #0005;border-color:#2b3b53;border-radius:20px}.row button{min-width:0}button{transition:filter .15s ease,transform .15s ease;border-radius:12px;font-weight:650;box-shadow:0 4px 12px #0002}button:hover{filter:brightness(1.12)}button:active{transform:scale(.985)}
 @media(max-width:850px){.layout{grid-template-columns:1fr}.controls{position:static}.viewer{min-height:180px}}
-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
-.badge{background:#173b38;color:#8fe3d0;border-radius:999px;padding:7px 11px;font-size:.85rem}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;padding:4px 2px 18px;border-bottom:1px solid #27344a}
+.badge{background:#12352f;color:#70e0bd;border:1px solid #235247;border-radius:999px;padding:8px 12px;font-size:.78rem;font-weight:750;letter-spacing:.04em}
 .viewer{background:#05070d;border:1px solid #29324b;border-radius:16px;overflow:hidden;min-height:220px;display:grid;place-items:center}
-img{display:block;width:100%;max-height:75vh;object-fit:contain}#placeholder{padding:28px;text-align:center;color:#b9c3dc}
+img{display:block;width:100%;max-height:78vh;object-fit:contain}#placeholder{padding:34px;text-align:center;color:#a1aec2;line-height:1.7}
 footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:.9rem}
-button{background:#315cff;color:white;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}
+button{background:linear-gradient(180deg,#4778ff,#315fe0);color:white;border:1px solid #5c87ff;border-radius:12px;padding:12px 14px;font-weight:650;cursor:pointer}
 .controls{margin-top:0;padding:18px;background:linear-gradient(160deg,#19243b,#121a2d);border:1px solid #344363;border-radius:18px;box-shadow:0 18px 50px #0004}
 .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.row button{flex:1}
 label{display:flex;justify-content:space-between;margin:8px 0}
-input[type=range]{width:100%;accent-color:#315cff}
-select{width:100%;padding:10px;border-radius:9px;background:#202a42;color:#f4f6ff;border:1px solid #394663;margin:4px 0 12px}
+input[type=range]{width:100%;accent-color:#5b83ff;cursor:pointer}
+select{width:100%;padding:12px;border-radius:11px;background:#151f30;color:#f4f7fb;border:1px solid #34445d;margin:5px 0 14px;outline:none}select:focus,input:focus{border-color:#6287ff}
 </style>
 </head>
 <body><main>
-<header><div><h1>CamLink</h1><div class="muted">Local network camera viewer</div></div><span id="badge" class="badge">Connecting…</span></header>
+<header><div><h1>CamLink</h1><div class="muted" style="margin-top:5px;font-size:.92rem">LIVE CAMERA  /  PRIVATE NETWORK VIEWER</div></div><span id="badge" class="badge">Connecting…</span></header>
 <div class="layout"><div class="feed-column"><div class="viewer"><div id="placeholder">Waiting for camera frames…<br>Keep CamLink open on the camera phone.</div><img id="feed" alt="Live camera feed" hidden></div>
 <footer><span id="status" class="muted">Connecting to camera stream…</span></footer></div>
 <section class="controls" aria-label="Remote camera controls">
