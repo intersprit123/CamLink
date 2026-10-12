@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicReference
 class MainActivity : ComponentActivity() {
     private lateinit var root: LinearLayout
     private var previewView: PreviewView? = null
+    private var hostPreviewWebView: WebView? = null
     private var webView: WebView? = null
     private var server: FrameServer? = null
     private val latestJpeg = AtomicReference<ByteArray?>(null)
@@ -62,6 +63,11 @@ class MainActivity : ComponentActivity() {
     private var hostResolutionSpinner: Spinner? = null
     private var hostJpegSeekBar: SeekBar? = null
     private var hostJpegLabel: TextView? = null
+    private var hostZoomSeekBar: SeekBar? = null
+    private var hostZoomLabel: TextView? = null
+    private var hostExposureSeekBar: SeekBar? = null
+    private var hostExposureLabel: TextView? = null
+    private var hostWhiteBalanceSpinner: Spinner? = null
     private val metricsHandler = Handler(Looper.getMainLooper())
     private var metricsRunnable: Runnable? = null
     private var controlReceiverRegistered = false
@@ -118,10 +124,15 @@ class MainActivity : ComponentActivity() {
         stopHost()
         baseLayout("Camera phone", "Camera sharing and performance controls")
         makeRootScrollable()
-        previewView = PreviewView(this).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+        hostPreviewWebView?.destroy()
+        hostPreviewWebView = WebView(this).apply {
+            setBackgroundColor(0xFF03050A.toInt())
+            settings.javaScriptEnabled = true
+            webChromeClient = WebChromeClient()
+            webViewClient = WebViewClient()
+            loadDataWithBaseURL("http://127.0.0.1:8080/", localHostPreviewHtml(), "text/html", "UTF-8", null)
         }
-        root.addView(previewView, LinearLayout.LayoutParams(-1, dp(170)))
+        root.addView(hostPreviewWebView, LinearLayout.LayoutParams(-1, dp(190)))
         val status = TextView(this).apply {
             text = "Camera sharing is off."
             textSize = 14f
@@ -167,6 +178,17 @@ class MainActivity : ComponentActivity() {
         }
         addButton("← Back") { showHome() }
     }
+
+    private fun localHostPreviewHtml() = """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <style>html,body{margin:0;width:100%;height:100%;background:#03050a;display:grid;place-items:center;overflow:hidden}
+        img{display:block;width:100%;height:100%;object-fit:contain}</style></head>
+        <body><img id="feed" alt="Waiting for camera…"><script>
+        const feed=document.getElementById('feed');
+        function reconnect(){feed.onerror=()=>setTimeout(reconnect,700);feed.src='http://127.0.0.1:8080/stream?t='+Date.now();}
+        reconnect();
+        </script></body></html>
+    """.trimIndent()
 
     private fun makeRootScrollable() {
         (root.parent as? ViewGroup)?.removeView(root)
@@ -234,6 +256,80 @@ class MainActivity : ComponentActivity() {
                 sendHostControl("jpeg", value.toString())
             }
         }
+
+        val zoomRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        hostZoomLabel = TextView(this).apply {
+            text = "Zoom 1.0×"
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+        }
+        zoomRow.addView(hostZoomLabel, LinearLayout.LayoutParams(dp(82), -2))
+        hostZoomSeekBar = SeekBar(this).apply {
+            max = 90
+            progress = 0
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    hostZoomLabel?.text = String.format(java.util.Locale.US, "Zoom %.1f×", 1.0 + progress / 10.0)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            })
+        }
+        zoomRow.addView(hostZoomSeekBar, LinearLayout.LayoutParams(0, dp(44), 1f))
+        root.addView(zoomRow)
+        addButton("Apply zoom") {
+            val zoom = 1.0 + (hostZoomSeekBar?.progress ?: 0) / 10.0
+            sendHostControl("zoom", String.format(java.util.Locale.US, "%.1f", zoom))
+        }
+
+        val exposureRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        hostExposureLabel = TextView(this).apply {
+            text = "Exposure 0"
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+        }
+        exposureRow.addView(hostExposureLabel, LinearLayout.LayoutParams(dp(94), -2))
+        hostExposureSeekBar = SeekBar(this).apply {
+            max = 6
+            progress = 3
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    hostExposureLabel?.text = "Exposure ${progress - 3}"
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            })
+        }
+        exposureRow.addView(hostExposureSeekBar, LinearLayout.LayoutParams(0, dp(44), 1f))
+        root.addView(exposureRow)
+        addButton("Apply exposure") {
+            sendHostControl("exposure", ((hostExposureSeekBar?.progress ?: 3) - 3).toString())
+        }
+
+        val whiteBalanceRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        hostWhiteBalanceSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                arrayOf("auto", "daylight", "cloudy", "incandescent", "fluorescent")
+            )
+            setSelection(0)
+        }
+        whiteBalanceRow.addView(hostWhiteBalanceSpinner, LinearLayout.LayoutParams(0, dp(48), 1f))
+        whiteBalanceRow.addView(compactButton("Apply WB", dp(0)) {
+            val value = hostWhiteBalanceSpinner?.selectedItem?.toString() ?: "auto"
+            sendHostControl("whitebalance", value)
+        }, LinearLayout.LayoutParams(dp(112), dp(44)))
+        root.addView(whiteBalanceRow)
 
         val quickRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -527,6 +623,7 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
         stopHostMetrics()
         try { cameraProvider?.unbindAll() } catch (_: Exception) { }
         webView?.destroy()
+        hostPreviewWebView?.destroy()
         cameraExecutor.shutdown()
         super.onDestroy()
     }
