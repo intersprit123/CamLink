@@ -16,7 +16,7 @@ import android.os.IBinder
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.featuregroup.GroupableFeature
+import androidx.camera.core.featuregroup.GroupableFeature.Companion.FPS_60
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.SessionConfig
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
@@ -125,7 +125,7 @@ class CameraStreamingService : LifecycleService() {
                 // Prefer 60 FPS where this camera/resolution combination supports it.
                 // CameraX falls back to a supported configuration instead of forcing 60 FPS.
                 val sessionConfig = SessionConfig.Builder(analysis)
-                    .setPreferredFeatureGroup(GroupableFeature.FPS_60)
+                    .setPreferredFeatureGroup(FPS_60)
                     .build()
                 activeCamera = cameraProvider.bindToLifecycle(this, selector, sessionConfig)
                 torchEnabled = false
