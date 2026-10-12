@@ -285,7 +285,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun viewerPage() = """
+fun viewerPage() = """
 <!doctype html>
 <html lang="en">
 <head>
