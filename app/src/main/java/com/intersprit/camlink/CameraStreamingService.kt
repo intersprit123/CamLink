@@ -43,8 +43,9 @@ class CameraStreamingService : LifecycleService() {
     private var provider: ProcessCameraProvider? = null
     @Volatile private var activeCamera: Camera? = null
     @Volatile private var torchEnabled = false
-    @Volatile private var jpegQuality = 85
-    @Volatile private var resolutionIndex = 2
+    @Volatile private var jpegQuality = 75
+    // Favor smoothness and lower CPU/network cost by default; higher capture modes remain selectable.
+    @Volatile private var resolutionIndex = 1
     @Volatile private var lensFacing = CameraSelector.LENS_FACING_BACK
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -111,6 +112,7 @@ class CameraStreamingService : LifecycleService() {
                 provider = cameraProvider
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_NV21)
                     .setTargetResolution(targetSize)
                     .build()
                 analysis.setAnalyzer(cameraExecutor) { image ->
@@ -220,24 +222,51 @@ class CameraStreamingService : LifecycleService() {
         val requiredSize = width * height * 3 / 2
         if (nv21Buffer.size != requiredSize) nv21Buffer = ByteArray(requiredSize)
         val nv21 = nv21Buffer
-        var pos = 0
+        var destinationOffset = 0
 
-        val y = image.planes[0].buffer
         val yPlane = image.planes[0]
-        for (row in 0 until height) {
-            for (col in 0 until width) {
-                nv21[pos++] = y.get(row * yPlane.rowStride + col * yPlane.pixelStride)
+        val yBuffer = yPlane.buffer.duplicate()
+        if (yPlane.pixelStride == 1 && yPlane.rowStride >= width) {
+            // Bulk-copy each luma row instead of doing a bounds-checked get for every pixel.
+            for (row in 0 until height) {
+                yBuffer.position(row * yPlane.rowStride)
+                yBuffer.get(nv21, destinationOffset, width)
+                destinationOffset += width
+            }
+        } else {
+            for (row in 0 until height) {
+                for (col in 0 until width) {
+                    nv21[destinationOffset++] = yBuffer.get(row * yPlane.rowStride + col * yPlane.pixelStride)
+                }
             }
         }
 
-        val u = image.planes[1].buffer
-        val v = image.planes[2].buffer
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
-        for (row in 0 until height / 2) {
-            for (col in 0 until width / 2) {
-                nv21[pos++] = v.get(row * vPlane.rowStride + col * vPlane.pixelStride)
-                nv21[pos++] = u.get(row * uPlane.rowStride + col * uPlane.pixelStride)
+        val u = uPlane.buffer.duplicate()
+        val v = vPlane.buffer.duplicate()
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+
+        // CameraX 1.5+ NV21 output provides VU-interleaved chroma on plane 2.
+        // Copy whole chroma rows when available; retain a stride-aware fallback for devices
+        // which expose an unexpected plane layout.
+        val contiguousVu = vPlane.pixelStride == 2 &&
+            vPlane.rowStride >= width &&
+            (chromaHeight == 0 || ((chromaHeight - 1) * vPlane.rowStride + width) <= v.limit())
+
+        if (contiguousVu) {
+            for (row in 0 until chromaHeight) {
+                v.position(row * vPlane.rowStride)
+                v.get(nv21, destinationOffset, width)
+                destinationOffset += width
+            }
+        } else {
+            for (row in 0 until chromaHeight) {
+                for (col in 0 until chromaWidth) {
+                    nv21[destinationOffset++] = v.get(row * vPlane.rowStride + col * vPlane.pixelStride)
+                    nv21[destinationOffset++] = u.get(row * uPlane.rowStride + col * uPlane.pixelStride)
+                }
             }
         }
 
@@ -246,8 +275,7 @@ class CameraStreamingService : LifecycleService() {
         val encodedHeight = if (rotation == 90 || rotation == 270) width else height
         val encodedData = if (rotation == 0) nv21 else rotateNv21(nv21, width, height, rotation)
 
-        // Rotate the YUV buffer directly. Decoding and re-encoding a JPEG into a Bitmap
-        // for every frame was expensive, especially at 1440p and 4K.
+        // Rotate the YUV buffer directly; never decode each frame into a Bitmap.
         jpegOutput.reset()
         YuvImage(encodedData, ImageFormat.NV21, encodedWidth, encodedHeight, null)
             .compressToJpeg(Rect(0, 0, encodedWidth, encodedHeight), jpegQuality, jpegOutput)
