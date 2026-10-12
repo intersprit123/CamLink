@@ -16,7 +16,9 @@ import android.os.IBinder
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.GroupableFeature
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.SessionConfig
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -119,7 +121,13 @@ class CameraStreamingService : LifecycleService() {
                     try { latestJpeg.set(imageToJpeg(image)) } catch (_: Exception) { } finally { image.close() }
                 }
                 cameraProvider.unbindAll()
-                activeCamera = cameraProvider.bindToLifecycle(this, CameraSelector.Builder().requireLensFacing(lensFacing).build(), analysis)
+                val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                // Prefer 60 FPS where this camera/resolution combination supports it.
+                // CameraX falls back to a supported configuration instead of forcing 60 FPS.
+                val sessionConfig = SessionConfig.Builder(analysis)
+                    .setPreferredFeatureGroup(GroupableFeature.FPS_60)
+                    .build()
+                activeCamera = cameraProvider.bindToLifecycle(this, selector, sessionConfig)
                 torchEnabled = false
             } catch (_: Exception) {
                 stopSelf()
