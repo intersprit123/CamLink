@@ -303,13 +303,24 @@ header{display:flex;align-items:center;justify-content:space-between;gap:12px;ma
 img{display:block;width:100%;max-height:75vh;object-fit:contain}#placeholder{padding:28px;text-align:center;color:#b9c3dc}
 footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:.9rem}
 button{background:#315cff;color:white;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}
+.controls{margin-top:14px;padding:14px;background:#171f34;border:1px solid #29324b;border-radius:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.row button{flex:1}
+label{display:flex;justify-content:space-between;margin:8px 0}
+input[type=range]{width:100%;accent-color:#315cff}
 </style>
 </head>
 <body><main>
 <header><div><h1>CamLink</h1><div class="muted">Local network camera viewer</div></div><span id="badge" class="badge">Connecting…</span></header>
 <div class="viewer"><div id="placeholder">Waiting for camera frames…<br>Keep CamLink open on the camera phone.</div><img id="feed" alt="Live camera feed" hidden></div>
-<footer><span id="status" class="muted">Connecting to camera stream…</span><button id="refresh" type="button">Reconnect</button></footer>
-<p class="muted">This page is served directly by the camera phone on your local Wi-Fi. Use only on a trusted network.</p>
+<section class="controls" aria-label="Remote camera controls">
+<div class="row"><button id="switch" type="button">Switch front / rear</button><button id="torch" type="button">Flashlight on / off</button></div>
+<label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label>
+<input id="zoom" type="range" min="1" max="4" step="0.1" value="1">
+<div class="row"><button id="refresh" type="button">Reconnect</button></div>
+<p id="controlStatus" class="muted" aria-live="polite">Controls affect the camera phone.</p>
+</section>
+<footer><span id="status" class="muted">Connecting to camera stream…</span></footer>
+<p class="muted">Remote controls work on supported cameras. This local page is unauthenticated; use only on a trusted network.</p>
 <script>
 const feed=document.getElementById('feed'),placeholder=document.getElementById('placeholder'),status=document.getElementById('status'),badge=document.getElementById('badge');
 let timer=null,failures=0;
@@ -319,6 +330,19 @@ function poll(){
  image.onerror=()=>{failures++;status.textContent='Waiting for camera frames. Check that sharing is started.';badge.textContent='WAITING';};
  image.src='/frame?t='+Date.now();
 }
+async function command(cmd,value){
+ const out=document.getElementById('controlStatus');
+ try{
+  const suffix=value===undefined?'':'&value='+encodeURIComponent(value);
+  const response=await fetch('/control?cmd='+encodeURIComponent(cmd)+suffix,{cache:'no-store'});
+  out.textContent=await response.text();
+ }catch(e){out.textContent='Control failed. Check that sharing is active.';}
+}
+document.getElementById('switch').addEventListener('click',()=>command('switch'));
+document.getElementById('torch').addEventListener('click',()=>command('torch'));
+const zoom=document.getElementById('zoom'),zoomLabel=document.getElementById('zoomLabel');
+zoom.addEventListener('input',()=>{zoomLabel.textContent=Number(zoom.value).toFixed(1)+'×';});
+zoom.addEventListener('change',()=>command('zoom',zoom.value));
 document.getElementById('refresh').addEventListener('click',()=>{failures=0;poll();});
 poll();timer=setInterval(poll,180);
 </script>
