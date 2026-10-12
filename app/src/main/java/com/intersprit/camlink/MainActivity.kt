@@ -245,8 +245,8 @@ class MainActivity : ComponentActivity() {
         <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step=".1" value="1">
         <label for="exposure">Exposure <strong id="exposureLabel">0</strong></label><input id="exposure" type="range" min="-3" max="3" step="1" value="0">
         <label for="whitebalance">White balance</label><select id="whitebalance"><option value="auto">Auto</option><option value="daylight">Daylight</option><option value="cloudy">Cloudy</option><option value="incandescent">Incandescent</option><option value="fluorescent">Fluorescent</option></select>
-        <label for="resolution">Capture resolution</label><select id="resolution"><option value="0">480p · Compatibility</option><option value="1">720p · HD</option><option value="2" selected>1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K if supported</option></select>
-        <label for="jpeg">JPEG quality <strong id="jpegLabel">85%</strong></label><input id="jpeg" type="range" min="50" max="95" step="5" value="85">
+        <label for="resolution">Capture resolution</label><select id="resolution"><option value="0">480p · Compatibility</option><option value="1" selected>720p · HD</option><option value="2">1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K if supported</option></select>
+        <label for="jpeg">JPEG quality <strong id="jpegLabel">75%</strong></label><input id="jpeg" type="range" min="50" max="95" step="5" value="75">
         <div class="row" style="margin-top:12px"><button id="reconnect">Reconnect stream</button></div><p class="muted" id="controlStatus" aria-live="polite">Controls require camera support.</p></section></div>
         <p class="muted">Use only on a trusted Wi-Fi network. Controls are available to devices that can reach this camera phone.</p>
         <script>
@@ -354,8 +354,8 @@ select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;ove
 <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step="0.1" value="1">
 <label for="exposure">Exposure compensation <strong id="exposureLabel">0</strong></label><input id="exposure" type="range" min="-3" max="3" step="1" value="0">
 <label for="whitebalance">White balance</label><select id="whitebalance"><option value="auto">Auto</option><option value="daylight">Daylight</option><option value="cloudy">Cloudy</option><option value="incandescent">Incandescent</option><option value="fluorescent">Fluorescent</option></select>
-<label for="resolution">Capture resolution</label><select id="resolution"><option value="0">480p · Compatibility</option><option value="1">720p · HD</option><option value="2" selected>1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K (if supported)</option></select>
-<label for="jpeg">JPEG quality <strong id="jpegLabel">85%</strong></label><input id="jpeg" type="range" min="50" max="95" step="5" value="85">
+<label for="resolution">Capture resolution</label><select id="resolution"><option value="0">480p · Compatibility</option><option value="1" selected>720p · HD</option><option value="2">1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K (if supported)</option></select>
+<label for="jpeg">JPEG quality <strong id="jpegLabel">75%</strong></label><input id="jpeg" type="range" min="50" max="95" step="5" value="75">
 <p id="controlStatus" class="muted" aria-live="polite">Remote controls require camera support.</p></section></div>
 <p class="muted">Controls affect the camera phone. This local page is unauthenticated; use only on a trusted network.</p>
 <script>
