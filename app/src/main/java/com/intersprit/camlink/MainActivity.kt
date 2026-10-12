@@ -111,25 +111,25 @@ class MainActivity : ComponentActivity() {
         }
         addButton("Switch front / rear camera") {
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+            if (hosting) startService(Intent(this, CameraStreamingService::class.java).setAction(CameraStreamingService.ACTION_SWITCH))
         }
         addButton("Stop sharing") {
             stopHost()
             status.text = "Camera sharing is off."
         }
         addButton("← Back") { showHome() }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+        // Camera capture is owned by the foreground service so streaming can continue when this screen is backgrounded.
     }
 
     private fun startHost(status: TextView) {
         if (hosting) return
         try {
-            server = FrameServer(latestJpeg).also { it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
+            val serviceIntent = Intent(this, CameraStreamingService::class.java)
+            ContextCompat.startForegroundService(this, serviceIntent)
             hosting = true
             val ip = localIpAddress()
-            status.text = "LIVE • http://$ip:8080\nEnter $ip on the viewer phone."
-            Toast.makeText(this, "Sharing started on port 8080", Toast.LENGTH_SHORT).show()
-            startCamera()
+            status.text = "LIVE • http://$ip:8080\nStreaming continues in the background."
+            Toast.makeText(this, "Background camera sharing started", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             status.text = "Could not start sharing: ${e.message ?: "unknown error"}"
         }
@@ -262,6 +262,7 @@ class MainActivity : ComponentActivity() {
     private fun stopHost() {
         try { cameraProvider?.unbindAll() } catch (_: Exception) { }
         cameraProvider = null
+        try { stopService(Intent(this, CameraStreamingService::class.java)) } catch (_: Exception) { }
         try { server?.stop() } catch (_: Exception) { }
         server = null
         hosting = false
@@ -322,7 +323,7 @@ poll();timer=setInterval(poll,180);
 </main></body></html>
 """.trimIndent()
 
-private class FrameServer(private val latestFrame: AtomicReference<ByteArray?>) : NanoHTTPD("0.0.0.0", 8080) {
+class FrameServer(private val latestFrame: AtomicReference<ByteArray?>) : NanoHTTPD("0.0.0.0", 8080) {
     override fun serve(session: IHTTPSession): Response {
         return when (session.uri) {
             "/frame" -> {
