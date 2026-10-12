@@ -255,6 +255,7 @@ class MainActivity : ComponentActivity() {
         feed.onerror=()=>{$('badge').textContent='WAITING';$('status').textContent='Stream unavailable. Check that camera sharing is active.';};
         async function command(cmd,value){try{const q=new URLSearchParams({cmd});if(value!==undefined)q.set('value',value);const r=await fetch('http://$host:8080/control?'+q.toString(),{cache:'no-store'});$('controlStatus').textContent=await r.text();}catch(e){$('controlStatus').textContent='Control failed · check Wi-Fi and camera sharing.';}}
         $('switch').onclick=()=>command('switch');$('torch').onclick=()=>command('torch');$('focus').onclick=()=>command('focus');
+$('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='75';$('jpegLabel').textContent='75%';await command('quality','1');await command('jpeg','75');};
         $('zoom').oninput=()=> $('zoomLabel').textContent=Number($('zoom').value).toFixed(1)+'×';
         $('zoom').onchange=()=>command('zoom',$('zoom').value);
         $('exposure').oninput=()=> $('exposureLabel').textContent=$('exposure').value;
@@ -351,6 +352,7 @@ select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;ove
 <footer><span id="status" class="muted">Connecting to continuous stream…</span><button id="refresh" type="button">Reconnect stream</button></footer></div>
 <section class="controls" aria-label="Remote camera controls">
 <div class="row"><button id="switch" type="button">Flip camera</button><button id="torch" type="button">Flashlight</button><button id="focus" type="button">Focus</button></div>
+<div class="row"><button id="performance" type="button">⚡ Max FPS / Low Latency preset</button></div>
 <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step="0.1" value="1">
 <label for="exposure">Exposure compensation <strong id="exposureLabel">0</strong></label><input id="exposure" type="range" min="-3" max="3" step="1" value="0">
 <label for="whitebalance">White balance</label><select id="whitebalance"><option value="auto">Auto</option><option value="daylight">Daylight</option><option value="cloudy">Cloudy</option><option value="incandescent">Incandescent</option><option value="fluorescent">Fluorescent</option></select>
@@ -364,6 +366,7 @@ feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · continuous
 feed.onerror=()=>{badge.textContent='WAITING';status.textContent='Stream unavailable. Check that sharing is started.';};
 async function command(cmd,value){const out=$('controlStatus');try{const q=new URLSearchParams({cmd});if(value!==undefined)q.set('value',value);const response=await fetch('/control?'+q.toString(),{cache:'no-store'});out.textContent=await response.text();}catch(e){out.textContent='Control failed. Check that sharing is active.';}}
 $('switch').onclick=()=>command('switch');$('torch').onclick=()=>command('torch');$('focus').onclick=()=>command('focus');
+$('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='75';$('jpegLabel').textContent='75%';await command('quality','1');await command('jpeg','75');};
 $('zoom').oninput=()=> $('zoomLabel').textContent=Number($('zoom').value).toFixed(1)+'×';$('zoom').onchange=()=>command('zoom',$('zoom').value);
 $('exposure').oninput=()=> $('exposureLabel').textContent=$('exposure').value;$('exposure').onchange=()=>command('exposure',$('exposure').value);
 $('whitebalance').onchange=()=>command('whitebalance',$('whitebalance').value);
