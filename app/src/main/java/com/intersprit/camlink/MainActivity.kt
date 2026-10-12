@@ -282,6 +282,46 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun viewerPage() = """
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>CamLink Live Camera</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#f4f6ff;background:#101525}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:18px}
+main{width:min(100%,900px)}h1{margin:0;font-size:clamp(1.6rem,5vw,2.3rem)}.muted{color:#b9c3dc}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.badge{background:#173b38;color:#8fe3d0;border-radius:999px;padding:7px 11px;font-size:.85rem}
+.viewer{background:#05070d;border:1px solid #29324b;border-radius:16px;overflow:hidden;min-height:220px;display:grid;place-items:center}
+img{display:block;width:100%;max-height:75vh;object-fit:contain}#placeholder{padding:28px;text-align:center;color:#b9c3dc}
+footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:.9rem}
+button{background:#315cff;color:white;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}
+</style>
+</head>
+<body><main>
+<header><div><h1>CamLink</h1><div class="muted">Local network camera viewer</div></div><span id="badge" class="badge">Connecting…</span></header>
+<div class="viewer"><div id="placeholder">Waiting for camera frames…<br>Keep CamLink open on the camera phone.</div><img id="feed" alt="Live camera feed" hidden></div>
+<footer><span id="status" class="muted">Connecting to camera stream…</span><button id="refresh" type="button">Reconnect</button></footer>
+<p class="muted">This page is served directly by the camera phone on your local Wi-Fi. Use only on a trusted network.</p>
+<script>
+const feed=document.getElementById('feed'),placeholder=document.getElementById('placeholder'),status=document.getElementById('status'),badge=document.getElementById('badge');
+let timer=null,failures=0;
+function poll(){
+ const image=new Image();
+ image.onload=()=>{feed.src=image.src;feed.hidden=false;placeholder.hidden=true;failures=0;status.textContent='Live • refreshes automatically';badge.textContent='LIVE';};
+ image.onerror=()=>{failures++;status.textContent='Waiting for camera frames. Check that sharing is started.';badge.textContent='WAITING';};
+ image.src='/frame?t='+Date.now();
+}
+document.getElementById('refresh').addEventListener('click',()=>{failures=0;poll();});
+poll();timer=setInterval(poll,180);
+</script>
+</main></body></html>
+""".trimIndent()
+
 private class FrameServer(private val latestFrame: AtomicReference<ByteArray?>) : NanoHTTPD("0.0.0.0", 8080) {
     override fun serve(session: IHTTPSession): Response {
         return when (session.uri) {
@@ -293,7 +333,11 @@ private class FrameServer(private val latestFrame: AtomicReference<ByteArray?>) 
                     addHeader("Access-Control-Allow-Origin", "*")
                 }
             }
-            else -> newFixedLengthResponse(Response.Status.OK, "text/plain", "CamLink camera server is running. Open the CamLink app on the other phone.")
+            "/", "/index.html" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", viewerPage()).apply {
+                addHeader("Cache-Control", "no-store")
+                addHeader("X-Content-Type-Options", "nosniff")
+            }
+            else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not found")
         }
     }
 }
