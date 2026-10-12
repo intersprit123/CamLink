@@ -6,7 +6,7 @@ CamLink is an Android camera-sharing prototype. A camera phone can stream to the
 
 - CameraX live preview and JPEG frame endpoint on port 8080.
 - Front/rear camera toggle.
-- **Local website:** when camera sharing is running, open `http://CAMERA_PHONE_IP:8080/` in any device browser on the same local network.
+- **Local website:** when camera sharing is running, open `http://CAMERA_PHONE_IP:8080/` in any device browser on the same local network. The page includes remote front/rear switching, flashlight toggle, and zoom slider (where supported).
 - Android viewer: enter the camera phone's local IP address.
 - GitHub Actions builds a debug APK automatically.
 
@@ -37,4 +37,4 @@ If the page does not load, check that both devices are on the same network, the 
 - V1 has no pairing code or encryption. Anyone who can reach port 8080 on that local network may be able to view the camera while sharing is active. Use only on a trusted network; do not expose or port-forward this port to the internet.
 - Camera permission is required. The camera phone must grant camera permission and show the ongoing foreground-service notification while sharing. You can switch apps or lock the screen, but Android battery policies may still stop the service.
 - This is a development build, not a production-ready security-reviewed app.
-- Secure pairing, HTTPS/authentication, hotspot improvements, remote controls, and smoother video are planned for later versions.
+- Secure pairing, HTTPS/authentication, improved hotspot compatibility, and smoother video are planned for later versions. Remote camera controls are available in the local website, subject to camera hardware support.
