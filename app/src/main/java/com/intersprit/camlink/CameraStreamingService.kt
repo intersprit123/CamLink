@@ -264,11 +264,13 @@ class CameraStreamingService : LifecycleService() {
 
         for (y in 0 until height) {
             for (x in 0 until width) {
-                val (dx, dy) = when (rotation) {
-                    90 -> height - 1 - y to x
-                    180 -> width - 1 - x to height - 1 - y
-                    270 -> y to width - 1 - x
-                    else -> x to y
+                val dx: Int
+                val dy: Int
+                when (rotation) {
+                    90 -> { dx = height - 1 - y; dy = x }
+                    180 -> { dx = width - 1 - x; dy = height - 1 - y }
+                    270 -> { dx = y; dy = width - 1 - x }
+                    else -> { dx = x; dy = y }
                 }
                 destination[dy * outputWidth + dx] = source[y * width + x]
             }
@@ -281,11 +283,13 @@ class CameraStreamingService : LifecycleService() {
         val destinationChromaOffset = outputWidth * outputHeight
         for (y in 0 until sourceChromaHeight) {
             for (x in 0 until sourceChromaWidth) {
-                val (dx, dy) = when (rotation) {
-                    90 -> sourceChromaHeight - 1 - y to x
-                    180 -> sourceChromaWidth - 1 - x to sourceChromaHeight - 1 - y
-                    270 -> y to sourceChromaWidth - 1 - x
-                    else -> x to y
+                val dx: Int
+                val dy: Int
+                when (rotation) {
+                    90 -> { dx = sourceChromaHeight - 1 - y; dy = x }
+                    180 -> { dx = sourceChromaWidth - 1 - x; dy = sourceChromaHeight - 1 - y }
+                    270 -> { dx = y; dy = sourceChromaWidth - 1 - x }
+                    else -> { dx = x; dy = y }
                 }
                 val from = sourceChromaOffset + (y * sourceChromaWidth + x) * 2
                 val to = destinationChromaOffset + (dy * destinationChromaWidth + dx) * 2
