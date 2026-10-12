@@ -409,6 +409,9 @@ class MainActivity : ComponentActivity() {
             val serviceIntent = Intent(this, CameraStreamingService::class.java)
             ContextCompat.startForegroundService(this, serviceIntent)
             hosting = true
+            hostPreviewWebView?.loadDataWithBaseURL(
+                "http://127.0.0.1:8080/", localHostPreviewHtml(), "text/html", "UTF-8", null
+            )
             val ip = localIpAddress()
             status.text = "LIVE • http://$ip:8080\nStreaming continues in the background."
             hostControlStatusView?.text = "MAX defaults: 720p · JPEG 75% · prefer 60 FPS when supported."
@@ -584,6 +587,7 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
 
     private fun stopHost() {
         stopHostMetrics()
+        hostPreviewWebView?.stopLoading()
         try { cameraProvider?.unbindAll() } catch (_: Exception) { }
         cameraProvider = null
         try { stopService(Intent(this, CameraStreamingService::class.java)) } catch (_: Exception) { }
