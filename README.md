@@ -1,39 +1,40 @@
 # CamLink 📱
 
-CamLink is an Android-to-Android camera-sharing experiment. One phone acts as the camera; another phone views its feed over the same local Wi-Fi network.
+CamLink is an Android camera-sharing prototype. A camera phone can stream to the built-in viewer, another phone's browser, or the CamLink Desktop viewer over a trusted local network.
 
-## V1 status
+## V1 features
 
-- Camera phone: CameraX preview and JPEG frame endpoint on port 8080.
-- Viewer phone: enter the camera phone's local IP address and connect.
+- CameraX live preview and JPEG frame endpoint on port 8080.
 - Front/rear camera toggle.
+- **Local website:** when camera sharing is running, open `http://CAMERA_PHONE_IP:8080/` in any device browser on the same local network.
+- Android viewer: enter the camera phone's local IP address.
 - GitHub Actions builds a debug APK automatically.
 
-This is an early MVP. The viewer currently refreshes JPEG frames, so it is not yet a smooth, low-latency video call. Keep the camera phone awake while sharing.
+The viewer refreshes JPEG frames; this is not yet a smooth, low-latency video call. Keep the camera phone awake and CamLink open while sharing.
 
 ## Build the APK
 
 1. Open the **Actions** tab in this repository.
-2. Select **Build CamLink APK** and wait for the workflow to finish.
+2. Select **Build CamLink APK** and wait for a successful run.
 3. Open the successful run and download the **CamLink-debug-apk** artifact.
-4. Extract the ZIP to get `app-debug.apk`, then install it on both Android phones.
+4. Extract the ZIP to get `app-debug.apk`, then install it on the Android phone(s).
 
-The first push to `main` should start the build automatically. You can also run it manually from Actions.
+## Use the local website
 
-## Test on two phones
+1. Connect the camera phone and the viewing phone/computer to the same Wi-Fi network. Alternatively, turn on the camera phone's hotspot and connect the viewer device to that hotspot; whether this works depends on Android/network routing.
+2. On the camera phone, open CamLink → **Share this phone's camera** → grant camera permission → **Start camera sharing**.
+3. Note the IP address shown by CamLink.
+4. On the other phone, open its browser and enter `http://<camera-phone-IP>:8080/`, replacing the example with the IP shown in CamLink. Example: `http://192.168.1.12:8080/`.
+5. The page should show the live camera feed. Keep sharing running on the camera phone.
 
-1. Install CamLink on both phones and connect them to the same trusted Wi-Fi network.
-2. On Phone 1, open CamLink → **Share this phone's camera** → grant camera permission → **Start camera sharing**.
-3. Note the IP address displayed by the app.
-4. On Phone 2, open CamLink → **View another phone**, enter Phone 1's IP address (without `http://`), then tap **Connect to camera**.
-5. To stop, return to Phone 1 and stop sharing.
+The Android in-app viewer is also available from **View another phone**.
 
-If the connection fails, check that both phones are on the same Wi-Fi, that the router allows devices to communicate with each other, and that no VPN/firewall blocks local traffic. Some guest Wi-Fi networks isolate devices.
+If the page does not load, check that both devices are on the same network, the network allows devices to communicate with each other, and no VPN/firewall blocks local traffic. Some guest Wi-Fi networks isolate clients. On some phone hotspots, connected clients may not be able to reach each other.
 
 ## Privacy and limitations
 
-- Streaming is only intended for your local network; do not use it on a network you do not trust.
-- V1 has no pairing code or encryption. Do not expose port 8080 to the internet or use this build for sensitive video.
+- The web page is hosted on the camera phone; no cloud server is required.
+- V1 has no pairing code or encryption. Anyone who can reach port 8080 on that local network may be able to view the camera while sharing is active. Use only on a trusted network; do not expose or port-forward this port to the internet.
 - Camera permission is required. The camera phone should visibly remain in the CamLink app while sharing.
 - This is a development build, not a production-ready security-reviewed app.
-- Hotspot connection support, remote controls, secure pairing, and smoother video are planned for later versions.
+- Secure pairing, HTTPS/authentication, hotspot improvements, remote controls, and smoother video are planned for later versions.
