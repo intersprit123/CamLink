@@ -417,7 +417,7 @@ class MainActivity : ComponentActivity() {
         main{max-width:1000px;margin:auto}header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
         h1{font-size:1.7rem;margin:0}.muted{color:#a1aec2;font-size:.9rem}.badge{background:#12352f;color:#70e0bd;padding:7px 10px;border-radius:999px;font-size:.75rem;font-weight:700}
         .layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:14px}.viewer{background:#03050a;border:1px solid #2b3b53;border-radius:14px;overflow:hidden;display:grid;place-items:center;min-height:180px}
-        img{width:100%;max-height:70vh;object-fit:contain;display:block}section{background:#121b2b;border:1px solid #2b3b53;border-radius:14px;padding:14px}
+        img{width:100%;max-height:70vh;object-fit:contain;display:block}img.original{width:auto;max-width:none;max-height:none}section{background:#121b2b;border:1px solid #2b3b53;border-radius:14px;padding:14px}
         button,select{font:inherit;border-radius:9px;padding:10px;border:1px solid #34445d;background:#1b2a42;color:white}
         button{background:#315fe0;border-color:#5c87ff;font-weight:650;cursor:pointer}.row{display:flex;gap:6px;margin-bottom:8px}.row button{flex:1;min-width:0;font-size:.84rem;padding:9px 4px}
         label{display:flex;justify-content:space-between;margin:12px 0 5px;font-size:.9rem}input[type=range]{width:100%;accent-color:#6287ff}
@@ -425,7 +425,7 @@ class MainActivity : ComponentActivity() {
         @media(max-width:720px){.layout{grid-template-columns:1fr}.viewer{min-height:120px}}
         </style></head><body><main>
         <header><div><h1>CamLink</h1><div class="muted">LIVE CAMERA · REMOTE CONTROLS</div></div><span id="badge" class="badge">CONNECTING</span></header>
-        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/stream" alt="Live camera stream"></div><p class="muted" id="status">Connecting to continuous stream…</p></div>
+        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/stream" alt="Live camera stream"></div><p class="muted" id="status">Connecting to continuous stream…</p><p class="muted" id="metrics">Measuring camera FPS and bitrate…</p><div class="row"><button id="fit">Fit preview</button><button id="original">Original size</button><button id="snapshot">Save snapshot</button></div></div>
         <section><div class="row"><button id="switch">Flip camera</button><button id="torch">Flash</button><button id="focus">Focus</button></div>
         <div class="row"><button id="performance">⚡ Max FPS / Low Latency preset</button></div>
         <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step=".1" value="1">
@@ -439,6 +439,11 @@ class MainActivity : ComponentActivity() {
         const $=id=>document.getElementById(id),feed=$('feed');
         feed.onload=()=>{$('badge').textContent='LIVE';$('status').textContent='Live · continuous stream';};
         feed.onerror=()=>{$('badge').textContent='WAITING';$('status').textContent='Stream unavailable. Check that camera sharing is active.';};
+        async function refreshMetrics(){try{const r=await fetch('http://$host:8080/stats',{cache:'no-store'});const d=await r.json();$('metrics').textContent='Camera '+Number(d.fps||0).toFixed(1)+' FPS · '+Number(d.encodeMs||0).toFixed(1)+' ms encode · '+Number(d.bitrateMbps||0).toFixed(2)+' Mbps · '+(d.width||0)+'×'+(d.height||0)+' · JPEG '+(d.jpegQuality||75)+'%';}catch(e){$('metrics').textContent='Camera performance metrics unavailable.';}}
+        refreshMetrics();setInterval(refreshMetrics,1000);
+        $('fit').onclick=()=>{feed.classList.remove('original');feed.style.width='100%';feed.style.maxHeight='70vh';};
+        $('original').onclick=()=>{feed.classList.add('original');feed.style.maxHeight='none';};
+        $('snapshot').onclick=()=>{try{const canvas=document.createElement('canvas');canvas.width=feed.naturalWidth;canvas.height=feed.naturalHeight;canvas.getContext('2d').drawImage(feed,0,0);const a=document.createElement('a');a.href=canvas.toDataURL('image/jpeg',0.92);a.download='CamLink_snapshot.jpg';a.click();$('controlStatus').textContent='Snapshot saved to Downloads if supported by this WebView.';}catch(e){$('controlStatus').textContent='Snapshot unavailable in this WebView. Use the Windows app to save a snapshot.';}};
         async function command(cmd,value){try{const q=new URLSearchParams({cmd});if(value!==undefined)q.set('value',value);const r=await fetch('http://$host:8080/control?'+q.toString(),{cache:'no-store'});$('controlStatus').textContent=await r.text();}catch(e){$('controlStatus').textContent='Control failed · check Wi-Fi and camera sharing.';}}
         $('switch').onclick=()=>command('switch');$('torch').onclick=()=>command('torch');$('focus').onclick=()=>command('focus');
 $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='75';$('jpegLabel').textContent='75%';await command('quality','1');await command('jpeg','75');};
@@ -559,7 +564,7 @@ select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;ove
 <body><main>
 <header><div><h1>CamLink</h1><div class="muted" style="margin-top:5px;font-size:.92rem">LIVE CAMERA / PRIVATE NETWORK VIEWER</div></div><span id="badge" class="badge">CONNECTING</span></header>
 <div class="layout"><div class="feed-column"><div class="viewer"><img id="feed" src="/stream" alt="Live camera feed"></div>
-<footer><span id="status" class="muted">Connecting to continuous stream…</span><button id="refresh" type="button">Reconnect stream</button></footer></div>
+<footer><span id="status" class="muted">Connecting to continuous stream…</span><button id="refresh" type="button">Reconnect stream</button></footer><p id="metrics" class="muted">Measuring camera FPS and bitrate…</p></div>
 <section class="controls" aria-label="Remote camera controls">
 <div class="row"><button id="switch" type="button">Flip camera</button><button id="torch" type="button">Flashlight</button><button id="focus" type="button">Focus</button></div>
 <div class="row"><button id="performance" type="button">⚡ Max FPS / Low Latency preset</button></div>
@@ -574,6 +579,8 @@ select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;ove
 const $=id=>document.getElementById(id),feed=$('feed'),status=$('status'),badge=$('badge');
 feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · continuous stream';};
 feed.onerror=()=>{badge.textContent='WAITING';status.textContent='Stream unavailable. Check that sharing is started.';};
+async function refreshMetrics(){try{const r=await fetch('/stats',{cache:'no-store'});const d=await r.json();$('metrics').textContent='Camera '+Number(d.fps||0).toFixed(1)+' FPS · '+Number(d.encodeMs||0).toFixed(1)+' ms encode · '+Number(d.bitrateMbps||0).toFixed(2)+' Mbps · '+(d.width||0)+'×'+(d.height||0)+' · JPEG '+(d.jpegQuality||75)+'%';}catch(e){$('metrics').textContent='Camera performance metrics unavailable.';}}
+refreshMetrics();setInterval(refreshMetrics,1000);
 async function command(cmd,value){const out=$('controlStatus');try{const q=new URLSearchParams({cmd});if(value!==undefined)q.set('value',value);const response=await fetch('/control?'+q.toString(),{cache:'no-store'});out.textContent=await response.text();}catch(e){out.textContent='Control failed. Check that sharing is active.';}}
 $('switch').onclick=()=>command('switch');$('torch').onclick=()=>command('torch');$('focus').onclick=()=>command('focus');
 $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='75';$('jpegLabel').textContent='75%';await command('quality','1');await command('jpeg','75');};
@@ -663,6 +670,12 @@ class FrameServer(
                 addHeader("Cache-Control", "no-store, no-cache, must-revalidate")
                 addHeader("Access-Control-Allow-Origin", "*")
                 addHeader("Connection", "close")
+            }
+            "/stats" -> newFixedLengthResponse(
+                Response.Status.OK, "application/json; charset=utf-8", CameraStreamingService.statsJsonForViewer()
+            ).apply {
+                addHeader("Cache-Control", "no-store")
+                addHeader("Access-Control-Allow-Origin", "*")
             }
             "/control" -> {
                 val params = session.parameters
