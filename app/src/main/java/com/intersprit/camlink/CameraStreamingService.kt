@@ -11,6 +11,7 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import android.os.Build
 import android.os.IBinder
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -27,6 +28,8 @@ class CameraStreamingService : LifecycleService() {
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var server: FrameServer? = null
     private var provider: ProcessCameraProvider? = null
+    @Volatile private var activeCamera: Camera? = null
+    @Volatile private var torchEnabled = false
     private var lensFacing = CameraSelector.LENS_FACING_BACK
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -39,7 +42,7 @@ class CameraStreamingService : LifecycleService() {
         startForegroundCompat()
         if (server == null) {
             try {
-                server = FrameServer(latestJpeg).also { it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
+                server = FrameServer(latestJpeg, ::handleWebControl).also { it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
             } catch (_: Exception) {
                 stopSelf()
                 return START_NOT_STICKY
@@ -91,11 +94,39 @@ class CameraStreamingService : LifecycleService() {
                     try { latestJpeg.set(imageToJpeg(image)) } catch (_: Exception) { } finally { image.close() }
                 }
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, CameraSelector.Builder().requireLensFacing(lensFacing).build(), analysis)
+                activeCamera = cameraProvider.bindToLifecycle(this, CameraSelector.Builder().requireLensFacing(lensFacing).build(), analysis)
+                torchEnabled = false
             } catch (_: Exception) {
                 stopSelf()
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+
+    private fun handleWebControl(command: String, value: String?): String {
+        return when (command) {
+            "switch" -> {
+                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+                ContextCompat.getMainExecutor(this).execute { startCamera() }
+                "Switching camera"
+            }
+            "torch" -> {
+                val camera = activeCamera ?: return "Camera is not ready"
+                if (!camera.cameraInfo.hasFlashUnit()) return "Flashlight is not available on this camera"
+                torchEnabled = !torchEnabled
+                camera.cameraControl.enableTorch(torchEnabled)
+                if (torchEnabled) "Flashlight on" else "Flashlight off"
+            }
+            "zoom" -> {
+                val requested = value?.toFloatOrNull() ?: return "Invalid zoom value"
+                val camera = activeCamera ?: return "Camera is not ready"
+                val state = camera.cameraInfo.zoomState.value ?: return "Zoom is not available"
+                val zoom = requested.coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                camera.cameraControl.setZoomRatio(zoom)
+                "Zoom set to %.1fx".format(zoom)
+            }
+            else -> "Unknown command"
+        }
     }
 
     private fun imageToJpeg(image: androidx.camera.core.ImageProxy): ByteArray {
@@ -121,6 +152,7 @@ class CameraStreamingService : LifecycleService() {
 
     override fun onDestroy() {
         try { provider?.unbindAll() } catch (_: Exception) { }
+        activeCamera = null
         try { server?.stop() } catch (_: Exception) { }
         cameraExecutor.shutdown()
         latestJpeg.set(null)
