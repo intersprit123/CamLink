@@ -98,6 +98,7 @@ class CameraStreamingService : LifecycleService() {
         }
     }
 
+    @OptIn(androidx.camera.core.ExperimentalSessionConfig::class)
     private fun startCamera() {
         val sizes = arrayOf(
             android.util.Size(640, 480),
