@@ -242,6 +242,7 @@ class MainActivity : ComponentActivity() {
         <header><div><h1>CamLink</h1><div class="muted">LIVE CAMERA · REMOTE CONTROLS</div></div><span id="badge" class="badge">CONNECTING</span></header>
         <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/stream" alt="Live camera stream"></div><p class="muted" id="status">Connecting to continuous stream…</p></div>
         <section><div class="row"><button id="switch">Flip camera</button><button id="torch">Flash</button><button id="focus">Focus</button></div>
+        <div class="row"><button id="performance">⚡ Max FPS / Low Latency preset</button></div>
         <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step=".1" value="1">
         <label for="exposure">Exposure <strong id="exposureLabel">0</strong></label><input id="exposure" type="range" min="-3" max="3" step="1" value="0">
         <label for="whitebalance">White balance</label><select id="whitebalance"><option value="auto">Auto</option><option value="daylight">Daylight</option><option value="cloudy">Cloudy</option><option value="incandescent">Incandescent</option><option value="fluorescent">Fluorescent</option></select>
