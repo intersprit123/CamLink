@@ -359,9 +359,22 @@ poll();timer=setInterval(poll,60);
 </main></body></html>
 """.trimIndent()
 
-class FrameServer(private val latestFrame: AtomicReference<ByteArray?>) : NanoHTTPD("0.0.0.0", 8080) {
+class FrameServer(
+    private val latestFrame: AtomicReference<ByteArray?>,
+    private val controlHandler: ((String, String?) -> String)? = null
+) : NanoHTTPD("0.0.0.0", 8080) {
     override fun serve(session: IHTTPSession): Response {
         return when (session.uri) {
+            "/control" -> {
+                val params = session.parameters
+                val command = params["cmd"]?.firstOrNull().orEmpty()
+                val value = params["value"]?.firstOrNull()
+                val message = if (controlHandler == null) "Controls are unavailable" else controlHandler.invoke(command, value)
+                newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", message).apply {
+                    addHeader("Cache-Control", "no-store")
+                    addHeader("Access-Control-Allow-Origin", "*")
+                }
+            }
             "/frame" -> {
                 val frame = latestFrame.get()
                 if (frame == null) newFixedLengthResponse(Response.Status.SERVICE_UNAVAILABLE, "text/plain", "Camera is starting")
