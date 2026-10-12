@@ -224,14 +224,47 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun viewerHtml(host: String) = """
-        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-        <style>body{margin:0;background:#101525;color:#fff;font:16px sans-serif;text-align:center}
-        h3{font-size:18px}img{width:100%;max-height:75vh;object-fit:contain;background:#000}
-        p{color:#b9c3dc}</style></head><body><h3>CamLink · Live view</h3>
-        <img id="feed" src="http://$host:8080/stream" alt="Waiting for camera frames…"><p id="state">Connecting to continuous stream…</p>
-        <script>const feed=document.getElementById('feed'),state=document.getElementById('state');
-        feed.onload=()=>state.textContent='Connected · continuous live stream';
-        feed.onerror=()=>state.textContent='Waiting for camera phone… check IP and Wi-Fi';</script></body></html>
+        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta name="color-scheme" content="dark"><title>CamLink Viewer</title>
+        <style>
+        :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#f4f7fb;background:#0a0f1a;color-scheme:dark}
+        *{box-sizing:border-box}body{margin:0;padding:16px;background:radial-gradient(ellipse at 15% 0%,#1b2a47,#0a0f1a 70%)}
+        main{max-width:1000px;margin:auto}header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+        h1{font-size:1.7rem;margin:0}.muted{color:#a1aec2;font-size:.9rem}.badge{background:#12352f;color:#70e0bd;padding:7px 10px;border-radius:999px;font-size:.75rem;font-weight:700}
+        .layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:14px}.viewer{background:#03050a;border:1px solid #2b3b53;border-radius:14px;overflow:hidden;display:grid;place-items:center;min-height:180px}
+        img{width:100%;max-height:70vh;object-fit:contain;display:block}section{background:#121b2b;border:1px solid #2b3b53;border-radius:14px;padding:14px}
+        button,select{font:inherit;border-radius:9px;padding:10px;border:1px solid #34445d;background:#1b2a42;color:white}
+        button{background:#315fe0;border-color:#5c87ff;font-weight:650;cursor:pointer}.row{display:flex;gap:6px;margin-bottom:8px}.row button{flex:1;min-width:0;font-size:.84rem;padding:9px 4px}
+        label{display:flex;justify-content:space-between;margin:12px 0 5px;font-size:.9rem}input[type=range]{width:100%;accent-color:#6287ff}
+        select{width:100%;margin-bottom:4px}#controlStatus{margin-top:12px;overflow-wrap:anywhere}
+        @media(max-width:720px){.layout{grid-template-columns:1fr}.viewer{min-height:120px}}
+        </style></head><body><main>
+        <header><div><h1>CamLink</h1><div class="muted">LIVE CAMERA · REMOTE CONTROLS</div></div><span id="badge" class="badge">CONNECTING</span></header>
+        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/stream" alt="Live camera stream"></div><p class="muted" id="status">Connecting to continuous stream…</p></div>
+        <section><div class="row"><button id="switch">Flip camera</button><button id="torch">Flash</button><button id="focus">Focus</button></div>
+        <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step=".1" value="1">
+        <label for="exposure">Exposure <strong id="exposureLabel">0</strong></label><input id="exposure" type="range" min="-3" max="3" step="1" value="0">
+        <label for="whitebalance">White balance</label><select id="whitebalance"><option value="auto">Auto</option><option value="daylight">Daylight</option><option value="cloudy">Cloudy</option><option value="incandescent">Incandescent</option><option value="fluorescent">Fluorescent</option></select>
+        <label for="resolution">Capture resolution</label><select id="resolution"><option value="0">480p · Compatibility</option><option value="1">720p · HD</option><option value="2" selected>1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K if supported</option></select>
+        <label for="jpeg">JPEG quality <strong id="jpegLabel">85%</strong></label><input id="jpeg" type="range" min="50" max="95" step="5" value="85">
+        <div class="row" style="margin-top:12px"><button id="reconnect">Reconnect stream</button></div><p class="muted" id="controlStatus" aria-live="polite">Controls require camera support.</p></section></div>
+        <p class="muted">Use only on a trusted Wi-Fi network. Controls are available to devices that can reach this camera phone.</p>
+        <script>
+        const $=id=>document.getElementById(id),feed=$('feed');
+        feed.onload=()=>{$('badge').textContent='LIVE';$('status').textContent='Live · continuous stream';};
+        feed.onerror=()=>{$('badge').textContent='WAITING';$('status').textContent='Stream unavailable. Check that camera sharing is active.';};
+        async function command(cmd,value){try{const q=new URLSearchParams({cmd});if(value!==undefined)q.set('value',value);const r=await fetch('http://$host:8080/control?'+q.toString(),{cache:'no-store'});$('controlStatus').textContent=await r.text();}catch(e){$('controlStatus').textContent='Control failed · check Wi-Fi and camera sharing.';}}
+        $('switch').onclick=()=>command('switch');$('torch').onclick=()=>command('torch');$('focus').onclick=()=>command('focus');
+        $('zoom').oninput=()=> $('zoomLabel').textContent=Number($('zoom').value).toFixed(1)+'×';
+        $('zoom').onchange=()=>command('zoom',$('zoom').value);
+        $('exposure').oninput=()=> $('exposureLabel').textContent=$('exposure').value;
+        $('exposure').onchange=()=>command('exposure',$('exposure').value);
+        $('whitebalance').onchange=()=>command('whitebalance',$('whitebalance').value);
+        $('resolution').onchange=()=>command('quality',$('resolution').value);
+        $('jpeg').oninput=()=> $('jpegLabel').textContent=$('jpeg').value+'%';
+        $('jpeg').onchange=()=>command('jpeg',$('jpeg').value);
+        $('reconnect').onclick=()=>{ $('badge').textContent='CONNECTING';feed.src='http://$host:8080/stream?reconnect='+Date.now();};
+        </script></main></body></html>
     """.trimIndent()
 
     private fun addButton(label: String, action: () -> Unit) {
@@ -296,69 +329,47 @@ fun viewerPage() = """
 <title>CamLink Live Camera</title>
 <style>
 :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#f4f7fb;background:#0a0f1a;color-scheme:dark}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:clamp(12px,2vw,28px);background:radial-gradient(ellipse at 12% 0%,#1b2a47 0%,#0d1422 48%,#080c14 100%)}
-main{width:min(100%,1500px)}h1{margin:0;font-size:clamp(1.7rem,4vw,2.45rem);letter-spacing:-.045em;font-weight:750}.muted{color:#a1aec2}
-.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}.feed-column{min-width:0}.controls{margin-top:0;position:sticky;top:16px;padding:20px;background:linear-gradient(155deg,#151f30,#101724);border:1px solid #2b3b53;border-radius:20px;box-shadow:0 22px 60px #0005}.viewer{box-shadow:0 22px 60px #0005;border-color:#2b3b53;border-radius:20px}.row button{min-width:0}button{transition:filter .15s ease,transform .15s ease;border-radius:12px;font-weight:650;box-shadow:0 4px 12px #0002}button:hover{filter:brightness(1.12)}button:active{transform:scale(.985)}
-@media(max-width:850px){.layout{grid-template-columns:1fr}.controls{position:static}.viewer{min-height:180px}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:clamp(12px,2vw,28px);background:radial-gradient(ellipse at 12% 0%,#1b2a47 0%,#0d1422 48%,#080c14 100%)}
+main{width:min(100%,1500px);margin:auto}h1{margin:0;font-size:clamp(1.7rem,4vw,2.45rem);letter-spacing:-.045em;font-weight:750}.muted{color:#a1aec2}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}.feed-column{min-width:0}
 header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;padding:4px 2px 18px;border-bottom:1px solid #27344a}
 .badge{background:#12352f;color:#70e0bd;border:1px solid #235247;border-radius:999px;padding:8px 12px;font-size:.78rem;font-weight:750;letter-spacing:.04em}
-.viewer{background:#05070d;border:1px solid #29324b;border-radius:16px;overflow:hidden;min-height:220px;display:grid;place-items:center}
-img{display:block;width:100%;max-height:78vh;object-fit:contain}#placeholder{padding:34px;text-align:center;color:#a1aec2;line-height:1.7}
-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:.9rem}
-button{background:linear-gradient(180deg,#4778ff,#315fe0);color:white;border:1px solid #5c87ff;border-radius:12px;padding:12px 14px;font-weight:650;cursor:pointer}
-.controls{margin-top:0;padding:18px;background:linear-gradient(160deg,#19243b,#121a2d);border:1px solid #344363;border-radius:18px;box-shadow:0 18px 50px #0004}
-.row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.row button{flex:1}
-label{display:flex;justify-content:space-between;margin:8px 0}
-input[type=range]{width:100%;accent-color:#5b83ff;cursor:pointer}
-select{width:100%;padding:12px;border-radius:11px;background:#151f30;color:#f4f7fb;border:1px solid #34445d;margin:5px 0 14px;outline:none}select:focus,input:focus{border-color:#6287ff}
+.viewer{background:#05070d;border:1px solid #29324b;border-radius:16px;overflow:hidden;min-height:220px;display:grid;place-items:center;box-shadow:0 22px 60px #0005}
+img{display:block;width:100%;max-height:78vh;object-fit:contain}footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:.9rem}
+.controls{position:sticky;top:16px;padding:18px;background:linear-gradient(160deg,#19243b,#121a2d);border:1px solid #344363;border-radius:18px;box-shadow:0 18px 50px #0004}
+button{background:linear-gradient(180deg,#4778ff,#315fe0);color:white;border:1px solid #5c87ff;border-radius:12px;padding:11px 10px;font-weight:650;cursor:pointer}
+button:hover{filter:brightness(1.1)}button:active{transform:scale(.99)}.row{display:flex;gap:8px;margin-bottom:12px}.row button{flex:1;min-width:0}
+label{display:flex;justify-content:space-between;margin:11px 0 6px}input[type=range]{width:100%;accent-color:#5b83ff;cursor:pointer}
+select{width:100%;padding:11px;border-radius:11px;background:#151f30;color:#f4f7fb;border:1px solid #34445d;margin:5px 0 12px;outline:none}
+select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;overflow-wrap:anywhere}
+@media(max-width:850px){.layout{grid-template-columns:1fr}.controls{position:static}.viewer{min-height:180px}}
 </style>
 </head>
 <body><main>
-<header><div><h1>CamLink</h1><div class="muted" style="margin-top:5px;font-size:.92rem">LIVE CAMERA  /  PRIVATE NETWORK VIEWER</div></div><span id="badge" class="badge">Connecting…</span></header>
-<div class="layout"><div class="feed-column"><div class="viewer"><div id="placeholder">Waiting for camera frames…<br>Keep CamLink open on the camera phone.</div><img id="feed" alt="Live camera feed" hidden></div>
-<footer><span id="status" class="muted">Connecting to camera stream…</span></footer></div>
+<header><div><h1>CamLink</h1><div class="muted" style="margin-top:5px;font-size:.92rem">LIVE CAMERA / PRIVATE NETWORK VIEWER</div></div><span id="badge" class="badge">CONNECTING</span></header>
+<div class="layout"><div class="feed-column"><div class="viewer"><img id="feed" src="/stream" alt="Live camera feed"></div>
+<footer><span id="status" class="muted">Connecting to continuous stream…</span><button id="refresh" type="button">Reconnect stream</button></footer></div>
 <section class="controls" aria-label="Remote camera controls">
-<div class="row"><button id="switch" type="button">Switch front / rear</button><button id="torch" type="button">Flashlight on / off</button></div>
-<label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label>
-<input id="zoom" type="range" min="1" max="4" step="0.1" value="1">
-<label for="resolution">Capture resolution</label>
-<select id="resolution"><option value="0">480p · compatibility</option><option value="1">720p · HD</option><option value="2" selected>1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K (if supported)</option></select>
-<label for="jpeg">JPEG quality <strong id="jpegLabel">85%</strong></label>
-<input id="jpeg" type="range" min="50" max="95" step="5" value="85">
-<div class="row"><button id="refresh" type="button">Reconnect</button></div>
-<p id="controlStatus" class="muted" aria-live="polite">Controls affect the camera phone.</p>
-</section>
-</div>
-<p class="muted">Remote controls work on supported cameras. This local page is unauthenticated; use only on a trusted network.</p>
+<div class="row"><button id="switch" type="button">Flip camera</button><button id="torch" type="button">Flashlight</button><button id="focus" type="button">Focus</button></div>
+<label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step="0.1" value="1">
+<label for="exposure">Exposure compensation <strong id="exposureLabel">0</strong></label><input id="exposure" type="range" min="-3" max="3" step="1" value="0">
+<label for="whitebalance">White balance</label><select id="whitebalance"><option value="auto">Auto</option><option value="daylight">Daylight</option><option value="cloudy">Cloudy</option><option value="incandescent">Incandescent</option><option value="fluorescent">Fluorescent</option></select>
+<label for="resolution">Capture resolution</label><select id="resolution"><option value="0">480p · Compatibility</option><option value="1">720p · HD</option><option value="2" selected>1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K (if supported)</option></select>
+<label for="jpeg">JPEG quality <strong id="jpegLabel">85%</strong></label><input id="jpeg" type="range" min="50" max="95" step="5" value="85">
+<p id="controlStatus" class="muted" aria-live="polite">Remote controls require camera support.</p></section></div>
+<p class="muted">Controls affect the camera phone. This local page is unauthenticated; use only on a trusted network.</p>
 <script>
-const feed=document.getElementById('feed'),placeholder=document.getElementById('placeholder'),status=document.getElementById('status'),badge=document.getElementById('badge');
-let timer=null,failures=0;
-function poll(){
- const image=new Image();
- image.onload=()=>{feed.src=image.src;feed.hidden=false;placeholder.hidden=true;failures=0;status.textContent='Live • refreshes automatically';badge.textContent='LIVE';};
- image.onerror=()=>{failures++;status.textContent='Waiting for camera frames. Check that sharing is started.';badge.textContent='WAITING';};
- image.src='/frame?t='+Date.now();
-}
-async function command(cmd,value){
- const out=document.getElementById('controlStatus');
- try{
-  const suffix=value===undefined?'':'&value='+encodeURIComponent(value);
-  const response=await fetch('/control?cmd='+encodeURIComponent(cmd)+suffix,{cache:'no-store'});
-  out.textContent=await response.text();
- }catch(e){out.textContent='Control failed. Check that sharing is active.';}
-}
-document.getElementById('switch').addEventListener('click',()=>command('switch'));
-document.getElementById('torch').addEventListener('click',()=>command('torch'));
-const zoom=document.getElementById('zoom'),zoomLabel=document.getElementById('zoomLabel');
-zoom.addEventListener('input',()=>{zoomLabel.textContent=Number(zoom.value).toFixed(1)+'×';});
-zoom.addEventListener('change',()=>command('zoom',zoom.value));
-const resolution=document.getElementById('resolution');
-resolution.addEventListener('change',()=>command('quality',resolution.value));
-const jpeg=document.getElementById('jpeg'),jpegLabel=document.getElementById('jpegLabel');
-jpeg.addEventListener('input',()=>{jpegLabel.textContent=jpeg.value+'%';});
-jpeg.addEventListener('change',()=>command('jpeg',jpeg.value));
-document.getElementById('refresh').addEventListener('click',()=>{failures=0;poll();});
-poll();timer=setInterval(poll,20);
+const $=id=>document.getElementById(id),feed=$('feed'),status=$('status'),badge=$('badge');
+feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · continuous stream';};
+feed.onerror=()=>{badge.textContent='WAITING';status.textContent='Stream unavailable. Check that sharing is started.';};
+async function command(cmd,value){const out=$('controlStatus');try{const q=new URLSearchParams({cmd});if(value!==undefined)q.set('value',value);const response=await fetch('/control?'+q.toString(),{cache:'no-store'});out.textContent=await response.text();}catch(e){out.textContent='Control failed. Check that sharing is active.';}}
+$('switch').onclick=()=>command('switch');$('torch').onclick=()=>command('torch');$('focus').onclick=()=>command('focus');
+$('zoom').oninput=()=> $('zoomLabel').textContent=Number($('zoom').value).toFixed(1)+'×';$('zoom').onchange=()=>command('zoom',$('zoom').value);
+$('exposure').oninput=()=> $('exposureLabel').textContent=$('exposure').value;$('exposure').onchange=()=>command('exposure',$('exposure').value);
+$('whitebalance').onchange=()=>command('whitebalance',$('whitebalance').value);
+$('resolution').onchange=()=>command('quality',$('resolution').value);
+$('jpeg').oninput=()=> $('jpegLabel').textContent=$('jpeg').value+'%';$('jpeg').onchange=()=>command('jpeg',$('jpeg').value);
+$('refresh').onclick=()=>{badge.textContent='CONNECTING';feed.src='/stream?reconnect='+Date.now();};
 </script>
 </main></body></html>
 """.trimIndent()
@@ -369,7 +380,11 @@ class FrameServer(
 ) : NanoHTTPD("0.0.0.0", 8080) {
     private fun mjpegStream(): InputStream = object : InputStream() {
         @Volatile private var closed = false
-        private var pending = ByteArray(0)
+        private val trailer = "\r\n".toByteArray(Charsets.US_ASCII)
+        private var header = ByteArray(0)
+        private var currentFrame: ByteArray? = null
+        // 0 = header, 1 = JPEG, 2 = trailing CRLF, 3 = wait for next frame.
+        private var segment = 3
         private var offset = 0
         private var previousFrame: ByteArray? = null
 
@@ -382,25 +397,45 @@ class FrameServer(
         override fun read(buffer: ByteArray, off: Int, len: Int): Int {
             if (closed) return -1
             if (len == 0) return 0
-            while (offset >= pending.size) {
-                var frame: ByteArray?
+            while (true) {
+                if (segment < 3) {
+                    val source = when (segment) {
+                        0 -> header
+                        1 -> currentFrame ?: ByteArray(0)
+                        else -> trailer
+                    }
+                    if (offset < source.size) {
+                        val count = minOf(len, source.size - offset)
+                        System.arraycopy(source, offset, buffer, off, count)
+                        offset += count
+                        return count
+                    }
+                    segment++
+                    offset = 0
+                    continue
+                }
+
+                var nextFrame: ByteArray?
                 do {
                     if (closed) return -1
-                    frame = latestFrame.get()
-                    if (frame == null || frame === previousFrame) {
-                        try { Thread.sleep(5) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return -1 }
+                    nextFrame = latestFrame.get()
+                    if (nextFrame == null || nextFrame === previousFrame) {
+                        try {
+                            Thread.sleep(5)
+                        } catch (_: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            return -1
+                        }
                     }
-                } while (frame == null || frame === previousFrame)
-                val currentFrame = frame ?: return -1
-                previousFrame = currentFrame
-                val header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${currentFrame.size}\r\n\r\n".toByteArray(Charsets.US_ASCII)
-                pending = header + currentFrame + "\r\n".toByteArray(Charsets.US_ASCII)
+                } while (nextFrame == null || nextFrame === previousFrame)
+
+                currentFrame = nextFrame
+                previousFrame = nextFrame
+                header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${nextFrame.size}\r\n\r\n"
+                    .toByteArray(Charsets.US_ASCII)
+                segment = 0
                 offset = 0
             }
-            val count = minOf(len, pending.size - offset)
-            System.arraycopy(pending, offset, buffer, off, count)
-            offset += count
-            return count
         }
 
         override fun close() {
