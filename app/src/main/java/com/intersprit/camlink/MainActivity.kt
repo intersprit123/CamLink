@@ -306,7 +306,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:12px;ma
 img{display:block;width:100%;max-height:75vh;object-fit:contain}#placeholder{padding:28px;text-align:center;color:#b9c3dc}
 footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:.9rem}
 button{background:#315cff;color:white;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}
-.controls{margin-top:14px;padding:14px;background:#171f34;border:1px solid #29324b;border-radius:14px}
+.controls{margin-top:0;padding:18px;background:linear-gradient(160deg,#19243b,#121a2d);border:1px solid #344363;border-radius:18px;box-shadow:0 18px 50px #0004}
 .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.row button{flex:1}
 label{display:flex;justify-content:space-between;margin:8px 0}
 input[type=range]{width:100%;accent-color:#315cff}
