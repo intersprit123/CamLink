@@ -388,9 +388,10 @@ class FrameServer(
                         try { Thread.sleep(5) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return -1 }
                     }
                 } while (frame == null || frame === previousFrame)
-                previousFrame = frame
-                val header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n".toByteArray(Charsets.US_ASCII)
-                pending = header + frame + "\r\n".toByteArray(Charsets.US_ASCII)
+                val currentFrame = frame ?: return -1
+                previousFrame = currentFrame
+                val header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${currentFrame.size}\r\n\r\n".toByteArray(Charsets.US_ASCII)
+                pending = header + currentFrame + "\r\n".toByteArray(Charsets.US_ASCII)
                 offset = 0
             }
             val count = minOf(len, pending.size - offset)
