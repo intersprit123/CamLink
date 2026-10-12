@@ -16,7 +16,7 @@ import android.os.IBinder
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.GroupableFeature
+import androidx.camera.core.featuregroup.GroupableFeature
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.SessionConfig
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
