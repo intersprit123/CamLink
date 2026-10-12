@@ -389,8 +389,8 @@ class FrameServer(
                     }
                 } while (frame == null || frame === previousFrame)
                 previousFrame = frame
-                val header = "--frame\\r\\nContent-Type: image/jpeg\\r\\nContent-Length: ${frame.size}\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII)
-                pending = header + frame + "\\r\\n".toByteArray(Charsets.US_ASCII)
+                val header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n".toByteArray(Charsets.US_ASCII)
+                pending = header + frame + "\r\n".toByteArray(Charsets.US_ASCII)
                 offset = 0
             }
             val count = minOf(len, pending.size - offset)
