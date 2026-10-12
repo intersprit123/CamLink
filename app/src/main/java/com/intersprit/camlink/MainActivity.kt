@@ -171,7 +171,7 @@ class MainActivity : ComponentActivity() {
     private fun makeRootScrollable() {
         (root.parent as? ViewGroup)?.removeView(root)
         val scroll = ScrollView(this).apply { isFillViewport = true }
-        scroll.addView(root, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(root, android.widget.FrameLayout.LayoutParams(-1, -2))
         setContentView(scroll)
     }
 
@@ -510,6 +510,7 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
             )
             controlReceiverRegistered = true
         }
+        if (hosting && hostMetricsView != null) startHostMetrics()
     }
 
     override fun onStop() {
