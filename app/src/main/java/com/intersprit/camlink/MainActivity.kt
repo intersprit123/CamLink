@@ -185,8 +185,16 @@ class MainActivity : ComponentActivity() {
         img{display:block;width:100%;height:100%;object-fit:contain}</style></head>
         <body><img id="feed" alt="Waiting for camera…"><script>
         const feed=document.getElementById('feed');
-        function reconnect(){feed.onerror=()=>setTimeout(reconnect,700);feed.src='http://127.0.0.1:8080/frame?t='+Date.now();}
-        reconnect();setInterval(()=>{if(!document.hidden)reconnect();},50);
+        let frameTimer=null;
+        function pollFrame(){
+            clearTimeout(frameTimer);
+            if(document.hidden){frameTimer=setTimeout(pollFrame,150);return;}
+            feed.onload=()=>{frameTimer=setTimeout(pollFrame,50);};
+            feed.onerror=()=>{frameTimer=setTimeout(pollFrame,700);};
+            feed.src='http://127.0.0.1:8080/frame?t='+Date.now();
+        }
+        pollFrame();
+        document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollFrame();});
         </script></body></html>
     """.trimIndent()
 
@@ -524,7 +532,7 @@ class MainActivity : ComponentActivity() {
         @media(max-width:720px){.layout{grid-template-columns:1fr}.viewer{min-height:120px}}
         </style></head><body><main>
         <header><div><h1>CamLink</h1><div class="muted">LIVE CAMERA · REMOTE CONTROLS</div></div><span id="badge" class="badge">CONNECTING</span></header>
-        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/frame" alt="Live camera frame"></div><p class="muted" id="status">Connecting to continuous stream…</p><p class="muted" id="metrics">Measuring camera FPS and bitrate…</p><div class="row"><button id="fit">Fit preview</button><button id="original">Original size</button><button id="snapshot">Save snapshot</button></div></div>
+        <div class="layout"><div><div class="viewer"><img id="feed" crossorigin="anonymous" alt="Live camera frame"></div><p class="muted" id="status">Connecting to live frames…</p><p class="muted" id="metrics">Measuring camera FPS and bitrate…</p><div class="row"><button id="fit">Fit preview</button><button id="original">Original size</button><button id="snapshot">Save snapshot</button></div></div>
         <section><div class="row"><button id="switch">Flip camera</button><button id="torch">Flash</button><button id="focus">Focus</button></div>
         <div class="row"><button id="performance">⚡ Max FPS / Low Latency preset</button></div>
         <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step=".1" value="1">
@@ -532,12 +540,12 @@ class MainActivity : ComponentActivity() {
         <label for="whitebalance">White balance</label><select id="whitebalance"><option value="auto">Auto</option><option value="daylight">Daylight</option><option value="cloudy">Cloudy</option><option value="incandescent">Incandescent</option><option value="fluorescent">Fluorescent</option></select>
         <label for="resolution">Capture resolution</label><select id="resolution"><option value="0">480p · Compatibility</option><option value="1" selected>720p · HD</option><option value="2">1080p · Full HD</option><option value="3">1440p · 2K</option><option value="4">2160p · 4K if supported</option></select>
         <label for="jpeg">JPEG quality <strong id="jpegLabel">75%</strong></label><input id="jpeg" type="range" min="50" max="95" step="5" value="75">
-        <div class="row" style="margin-top:12px"><button id="reconnect">Reconnect stream</button></div><p class="muted" id="controlStatus" aria-live="polite">Controls require camera support.</p></section></div>
+        <div class="row" style="margin-top:12px"><button id="reconnect">Reconnect feed</button></div><p class="muted" id="controlStatus" aria-live="polite">Controls require camera support.</p></section></div>
         <p class="muted">Use only on a trusted Wi-Fi network. Controls are available to devices that can reach this camera phone.</p>
         <script>
         const $=id=>document.getElementById(id),feed=$('feed');
-        feed.onload=()=>{$('badge').textContent='LIVE';$('status').textContent='Live · continuous stream';};
-        feed.onerror=()=>{$('badge').textContent='WAITING';$('status').textContent='Stream unavailable. Check that camera sharing is active.';};
+        feed.onload=()=>{$('badge').textContent='LIVE';$('status').textContent='Live · frame polling';};
+        feed.onerror=()=>{$('badge').textContent='WAITING';$('status').textContent='Frame unavailable. Check that camera sharing is active.';};
         async function refreshMetrics(){try{const r=await fetch('http://$host:8080/stats',{cache:'no-store'});const d=await r.json();$('metrics').textContent='Camera '+Number(d.fps||0).toFixed(1)+' FPS · '+Number(d.encodeMs||0).toFixed(1)+' ms encode · '+Number(d.bitrateMbps||0).toFixed(2)+' Mbps · '+(d.width||0)+'×'+(d.height||0)+' · JPEG '+(d.jpegQuality||75)+'%';}catch(e){$('metrics').textContent='Camera performance metrics unavailable.';}}
         refreshMetrics();setInterval(refreshMetrics,1000);
         $('fit').onclick=()=>{feed.classList.remove('original');feed.style.width='100%';feed.style.maxHeight='70vh';};
@@ -554,8 +562,17 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
         $('resolution').onchange=()=>command('quality',$('resolution').value);
         $('jpeg').oninput=()=> $('jpegLabel').textContent=$('jpeg').value+'%';
         $('jpeg').onchange=()=>command('jpeg',$('jpeg').value);
-        $('reconnect').onclick=()=>{ $('badge').textContent='CONNECTING';feed.src='http://$host:8080/frame?t='+Date.now();};
-        setInterval(()=>{if(!document.hidden)feed.src='http://$host:8080/frame?t='+Date.now();},50);
+        let frameTimer=null;
+        function pollFrame(){
+            clearTimeout(frameTimer);
+            if(document.hidden){frameTimer=setTimeout(pollFrame,150);return;}
+            feed.onload=()=>{$('badge').textContent='LIVE';$('status').textContent='Live · frame polling';frameTimer=setTimeout(pollFrame,50);};
+            feed.onerror=()=>{$('badge').textContent='WAITING';$('status').textContent='Frame unavailable. Check that camera sharing is active.';frameTimer=setTimeout(pollFrame,700);};
+            feed.src='http://$host:8080/frame?t='+Date.now();
+        }
+        pollFrame();
+        document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollFrame();});
+        $('reconnect').onclick=()=>{ $('badge').textContent='CONNECTING';pollFrame();};
         </script></main></body></html>
     """.trimIndent()
 
@@ -685,7 +702,7 @@ select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;ove
 </head>
 <body><main>
 <header><div><h1>CamLink</h1><div class="muted" style="margin-top:5px;font-size:.92rem">LIVE CAMERA / PRIVATE NETWORK VIEWER</div></div><span id="badge" class="badge">CONNECTING</span></header>
-<div class="layout"><div class="feed-column"><div class="viewer"><img id="feed" src="/frame" alt="Live camera frame"></div>
+<div class="layout"><div class="feed-column"><div class="viewer"><img id="feed" crossorigin="anonymous" alt="Live camera frame"></div>
 <footer><span id="status" class="muted">Connecting to continuous stream…</span><button id="refresh" type="button">Reconnect stream</button></footer><p id="metrics" class="muted">Measuring camera FPS and bitrate…</p></div>
 <section class="controls" aria-label="Remote camera controls">
 <div class="row"><button id="switch" type="button">Flip camera</button><button id="torch" type="button">Flashlight</button><button id="focus" type="button">Focus</button></div>
@@ -699,8 +716,8 @@ select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;ove
 <p class="muted">Controls affect the camera phone. This local page is unauthenticated; use only on a trusted network.</p>
 <script>
 const $=id=>document.getElementById(id),feed=$('feed'),status=$('status'),badge=$('badge');
-feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · continuous stream';};
-feed.onerror=()=>{badge.textContent='WAITING';status.textContent='Stream unavailable. Check that sharing is started.';};
+feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · frame polling';};
+feed.onerror=()=>{badge.textContent='WAITING';status.textContent='Frame unavailable. Check that sharing is started.';};
 async function refreshMetrics(){try{const r=await fetch('/stats',{cache:'no-store'});const d=await r.json();$('metrics').textContent='Camera '+Number(d.fps||0).toFixed(1)+' FPS · '+Number(d.encodeMs||0).toFixed(1)+' ms encode · '+Number(d.bitrateMbps||0).toFixed(2)+' Mbps · '+(d.width||0)+'×'+(d.height||0)+' · JPEG '+(d.jpegQuality||75)+'%';}catch(e){$('metrics').textContent='Camera performance metrics unavailable.';}}
 refreshMetrics();setInterval(refreshMetrics,1000);
 async function command(cmd,value){const out=$('controlStatus');try{const q=new URLSearchParams({cmd});if(value!==undefined)q.set('value',value);const response=await fetch('/control?'+q.toString(),{cache:'no-store'});out.textContent=await response.text();}catch(e){out.textContent='Control failed. Check that sharing is active.';}}
@@ -711,8 +728,17 @@ $('exposure').oninput=()=> $('exposureLabel').textContent=$('exposure').value;$(
 $('whitebalance').onchange=()=>command('whitebalance',$('whitebalance').value);
 $('resolution').onchange=()=>command('quality',$('resolution').value);
 $('jpeg').oninput=()=> $('jpegLabel').textContent=$('jpeg').value+'%';$('jpeg').onchange=()=>command('jpeg',$('jpeg').value);
-$('refresh').onclick=()=>{badge.textContent='CONNECTING';feed.src='/frame?t='+Date.now();};
-setInterval(()=>{if(!document.hidden)feed.src='/frame?t='+Date.now();},50);
+let frameTimer=null;
+function pollFrame(){
+  clearTimeout(frameTimer);
+  if(document.hidden){frameTimer=setTimeout(pollFrame,150);return;}
+  feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · frame polling';frameTimer=setTimeout(pollFrame,50);};
+  feed.onerror=()=>{badge.textContent='WAITING';status.textContent='Frame unavailable. Check that sharing is started.';frameTimer=setTimeout(pollFrame,700);};
+  feed.src='/frame?t='+Date.now();
+}
+pollFrame();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollFrame();});
+$('refresh').onclick=()=>{badge.textContent='CONNECTING';pollFrame();};
 </script>
 </main></body></html>
 """.trimIndent()
