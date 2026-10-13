@@ -14,6 +14,12 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+      - name: Set up Python for connection checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify Android connection contract
+        run: python scripts/verify_connection_contract.py
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
