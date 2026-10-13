@@ -12,7 +12,9 @@ import android.graphics.YuvImage
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -35,6 +37,7 @@ import java.util.concurrent.atomic.AtomicReference
 class CameraStreamingService : LifecycleService() {
     private val latestJpeg = AtomicReference<ByteArray?>(null)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
     // Reuse the large intermediate buffers; only immutable JPEG byte arrays are published to readers.
     private var nv21Buffer = ByteArray(0)
     private var rotatedNv21Buffer = ByteArray(0)
@@ -55,12 +58,27 @@ class CameraStreamingService : LifecycleService() {
         if (intent?.action == ACTION_CONTROL) {
             val command = intent.getStringExtra(EXTRA_CONTROL_COMMAND).orEmpty()
             val value = intent.getStringExtra(EXTRA_CONTROL_VALUE)
-            val message = if (server == null) {
-                "Camera sharing is not active yet"
-            } else {
-                handleWebControl(command, value)
+
+            // A control request can restart a service that Android previously reclaimed.
+            // Recover the foreground sharing service instead of replying "not active" and
+            // dropping the first settings action.
+            if (server == null) {
+                try {
+                    startForegroundCompat()
+                    if (!ensureServerStarted()) {
+                        sendControlResult("Could not restart camera sharing. Tap Stop sharing, then Start camera sharing again.")
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                    startCamera()
+                } catch (e: Exception) {
+                    sendControlResult("Could not restart camera sharing: ${e.message ?: "unknown error"}")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
             }
-            sendBroadcast(Intent(ACTION_CONTROL_RESULT).setPackage(packageName).putExtra(EXTRA_CONTROL_RESULT_TEXT, message))
+
+            applyControlWhenReady(command, value, 0)
             return START_STICKY
         }
         if (intent?.action == ACTION_SWITCH) {
@@ -69,16 +87,52 @@ class CameraStreamingService : LifecycleService() {
             return START_STICKY
         }
         startForegroundCompat()
-        if (server == null) {
-            try {
-                server = FrameServer(latestJpeg, ::handleWebControl).also { it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
-            } catch (_: Exception) {
-                stopSelf()
-                return START_NOT_STICKY
-            }
+        if (!ensureServerStarted()) {
+            stopSelf()
+            return START_NOT_STICKY
         }
         startCamera()
         return START_STICKY
+    }
+
+    private fun ensureServerStarted(): Boolean {
+        if (server != null) return true
+        return try {
+            server = FrameServer(latestJpeg, ::handleWebControl).also {
+                it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun sendControlResult(message: String) {
+        sendBroadcast(
+            Intent(ACTION_CONTROL_RESULT)
+                .setPackage(packageName)
+                .putExtra(EXTRA_CONTROL_RESULT_TEXT, message)
+        )
+    }
+
+    private fun applyControlWhenReady(command: String, value: String?, attempt: Int) {
+        if (server == null) {
+            sendControlResult("Camera sharing stopped before the setting could be applied.")
+            return
+        }
+
+        // These settings update service state and do not require an opened CameraX camera.
+        if (command == "jpeg" || command == "quality" || activeCamera != null) {
+            sendControlResult(handleWebControl(command, value))
+            return
+        }
+
+        if (attempt >= 25) {
+            sendControlResult("Camera is still starting. Wait for the live preview, then apply the setting again.")
+            return
+        }
+
+        mainHandler.postDelayed({ applyControlWhenReady(command, value, attempt + 1) }, 200)
     }
 
     private fun startForegroundCompat() {
@@ -379,6 +433,7 @@ class CameraStreamingService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         try { provider?.unbindAll() } catch (_: Exception) { }
         activeCamera = null
         try { server?.stop() } catch (_: Exception) { }
