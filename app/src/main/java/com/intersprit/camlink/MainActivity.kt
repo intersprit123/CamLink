@@ -570,19 +570,38 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
     }
 
     private fun localIpAddress(): String {
+        // Prefer the actual Wi-Fi interface address. Iterating all interfaces first can
+        // accidentally select a VPN, mobile-data, or virtual-adapter IP that viewers
+        // on the same Wi-Fi network cannot reach.
         try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val addresses = interfaces.nextElement().inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val address = addresses.nextElement()
-                    if (!address.isLoopbackAddress && address is Inet4Address) return address.hostAddress ?: "0.0.0.0"
-                }
+            val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            val wifiIp = wifi.connectionInfo.ipAddress
+            if (wifiIp != 0) {
+                val formatted = Formatter.formatIpAddress(wifiIp)
+                if (formatted.isNotBlank() && formatted != "0.0.0.0") return formatted
             }
         } catch (_: Exception) { }
-        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        @Suppress("DEPRECATION")
-        return Formatter.formatIpAddress(wifi.connectionInfo.ipAddress).ifBlank { "0.0.0.0" }
+
+        try {
+            val candidates = mutableListOf<Pair<Int, String>>()
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                if (!networkInterface.isUp || networkInterface.isLoopback) continue
+                val addresses = networkInterface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    if (address is Inet4Address && !address.isLoopbackAddress && address.isSiteLocalAddress) {
+                        val isWifi = networkInterface.name.startsWith("wlan", ignoreCase = true) ||
+                            networkInterface.name.startsWith("wifi", ignoreCase = true)
+                        candidates.add((if (isWifi) 0 else 1) to (address.hostAddress ?: continue))
+                    }
+                }
+            }
+            candidates.sortedBy { it.first }.firstOrNull()?.second?.let { return it }
+        } catch (_: Exception) { }
+        return "0.0.0.0"
     }
 
     private fun stopHost() {
