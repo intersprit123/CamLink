@@ -5,7 +5,6 @@ These checks catch broken wiring between UI actions, frame production, HTTP endp
 and viewer requests. They complement (but do not replace) a real device/network test.
 """
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "app/src/main/java/com/intersprit/camlink/MainActivity.kt").read_text(encoding="utf-8")
@@ -38,7 +37,7 @@ frame_route = section(MAIN, '"/frame" -> {', '"/", "/index.html" ->')
 control_route = section(MAIN, '"/control" -> {', '"/frame" ->')
 
 # Button -> app/service lifecycle.
-check("camera-share button opens the host screen", 'addButton("📷  Share this phone\\'s camera") { showHost() }' in MAIN)
+check("camera-share button opens the host screen", "addButton(\"📷  Share this phone's camera\") { showHost() }" in MAIN)
 check("host Start button invokes startHost", 'addButton("Start camera sharing")' in MAIN and "startHost(status)" in MAIN)
 check("host starts the foreground camera service", "ContextCompat.startForegroundService(this, serviceIntent)" in MAIN)
 check("viewer Connect button opens viewerHtml(host)", 'addButton("Connect to camera")' in MAIN and "viewerHtml(host)" in MAIN)
@@ -75,7 +74,7 @@ check("/control reads cmd/value and delegates to the camera handler",
       "controlHandler.invoke(command, value)" in control_route)
 for command in ("switch", "torch", "focus", "zoom", "exposure", "whitebalance", "quality", "jpeg"):
     check(f"viewer sends {command} and service handles it",
-          (f"command('{command}')" in remote_viewer or f'"{command}",' in remote_viewer) and
+          (f"'{command}'" in remote_viewer or f'\"{command}\"' in remote_viewer) and
           f'"{command}" ->' in SERVICE)
 check("stats endpoint and viewer metrics are connected", '"/stats" ->' in MAIN and
       "statsJsonForViewer()" in MAIN and "/stats" in remote_viewer and "/stats" in embedded_viewer)
