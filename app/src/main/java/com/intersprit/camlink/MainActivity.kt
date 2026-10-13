@@ -185,8 +185,8 @@ class MainActivity : ComponentActivity() {
         img{display:block;width:100%;height:100%;object-fit:contain}</style></head>
         <body><img id="feed" alt="Waiting for camera…"><script>
         const feed=document.getElementById('feed');
-        function reconnect(){feed.onerror=()=>setTimeout(reconnect,700);feed.src='http://127.0.0.1:8080/stream?t='+Date.now();}
-        reconnect();
+        function reconnect(){feed.onerror=()=>setTimeout(reconnect,700);feed.src='http://127.0.0.1:8080/frame?t='+Date.now();}
+        reconnect();setInterval(()=>{if(!document.hidden)reconnect();},50);
         </script></body></html>
     """.trimIndent()
 
@@ -524,7 +524,7 @@ class MainActivity : ComponentActivity() {
         @media(max-width:720px){.layout{grid-template-columns:1fr}.viewer{min-height:120px}}
         </style></head><body><main>
         <header><div><h1>CamLink</h1><div class="muted">LIVE CAMERA · REMOTE CONTROLS</div></div><span id="badge" class="badge">CONNECTING</span></header>
-        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/stream" alt="Live camera stream"></div><p class="muted" id="status">Connecting to continuous stream…</p><p class="muted" id="metrics">Measuring camera FPS and bitrate…</p><div class="row"><button id="fit">Fit preview</button><button id="original">Original size</button><button id="snapshot">Save snapshot</button></div></div>
+        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/frame?t='+Date.now()" alt="Live camera frame"></div><p class="muted" id="status">Connecting to continuous stream…</p><p class="muted" id="metrics">Measuring camera FPS and bitrate…</p><div class="row"><button id="fit">Fit preview</button><button id="original">Original size</button><button id="snapshot">Save snapshot</button></div></div>
         <section><div class="row"><button id="switch">Flip camera</button><button id="torch">Flash</button><button id="focus">Focus</button></div>
         <div class="row"><button id="performance">⚡ Max FPS / Low Latency preset</button></div>
         <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step=".1" value="1">
@@ -554,7 +554,8 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
         $('resolution').onchange=()=>command('quality',$('resolution').value);
         $('jpeg').oninput=()=> $('jpegLabel').textContent=$('jpeg').value+'%';
         $('jpeg').onchange=()=>command('jpeg',$('jpeg').value);
-        $('reconnect').onclick=()=>{ $('badge').textContent='CONNECTING';feed.src='http://$host:8080/stream?reconnect='+Date.now();};
+        $('reconnect').onclick=()=>{ $('badge').textContent='CONNECTING';feed.src='http://$host:8080/frame?t='+Date.now();};
+        setInterval(()=>{if(!document.hidden)feed.src='http://$host:8080/frame?t='+Date.now();},50);
         </script></main></body></html>
     """.trimIndent()
 
@@ -684,7 +685,7 @@ select:focus,input:focus{border-color:#6287ff}#controlStatus{line-height:1.5;ove
 </head>
 <body><main>
 <header><div><h1>CamLink</h1><div class="muted" style="margin-top:5px;font-size:.92rem">LIVE CAMERA / PRIVATE NETWORK VIEWER</div></div><span id="badge" class="badge">CONNECTING</span></header>
-<div class="layout"><div class="feed-column"><div class="viewer"><img id="feed" src="/stream" alt="Live camera feed"></div>
+<div class="layout"><div class="feed-column"><div class="viewer"><img id="feed" src="/frame" alt="Live camera frame"></div>
 <footer><span id="status" class="muted">Connecting to continuous stream…</span><button id="refresh" type="button">Reconnect stream</button></footer><p id="metrics" class="muted">Measuring camera FPS and bitrate…</p></div>
 <section class="controls" aria-label="Remote camera controls">
 <div class="row"><button id="switch" type="button">Flip camera</button><button id="torch" type="button">Flashlight</button><button id="focus" type="button">Focus</button></div>
@@ -710,7 +711,8 @@ $('exposure').oninput=()=> $('exposureLabel').textContent=$('exposure').value;$(
 $('whitebalance').onchange=()=>command('whitebalance',$('whitebalance').value);
 $('resolution').onchange=()=>command('quality',$('resolution').value);
 $('jpeg').oninput=()=> $('jpegLabel').textContent=$('jpeg').value+'%';$('jpeg').onchange=()=>command('jpeg',$('jpeg').value);
-$('refresh').onclick=()=>{badge.textContent='CONNECTING';feed.src='/stream?reconnect='+Date.now();};
+$('refresh').onclick=()=>{badge.textContent='CONNECTING';feed.src='/frame?t='+Date.now();};
+setInterval(()=>{if(!document.hidden)feed.src='/frame?t='+Date.now();},50);
 </script>
 </main></body></html>
 """.trimIndent()
