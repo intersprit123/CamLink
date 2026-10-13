@@ -524,7 +524,7 @@ class MainActivity : ComponentActivity() {
         @media(max-width:720px){.layout{grid-template-columns:1fr}.viewer{min-height:120px}}
         </style></head><body><main>
         <header><div><h1>CamLink</h1><div class="muted">LIVE CAMERA · REMOTE CONTROLS</div></div><span id="badge" class="badge">CONNECTING</span></header>
-        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/frame?t='+Date.now()" alt="Live camera frame"></div><p class="muted" id="status">Connecting to continuous stream…</p><p class="muted" id="metrics">Measuring camera FPS and bitrate…</p><div class="row"><button id="fit">Fit preview</button><button id="original">Original size</button><button id="snapshot">Save snapshot</button></div></div>
+        <div class="layout"><div><div class="viewer"><img id="feed" src="http://$host:8080/frame" alt="Live camera frame"></div><p class="muted" id="status">Connecting to continuous stream…</p><p class="muted" id="metrics">Measuring camera FPS and bitrate…</p><div class="row"><button id="fit">Fit preview</button><button id="original">Original size</button><button id="snapshot">Save snapshot</button></div></div>
         <section><div class="row"><button id="switch">Flip camera</button><button id="torch">Flash</button><button id="focus">Focus</button></div>
         <div class="row"><button id="performance">⚡ Max FPS / Low Latency preset</button></div>
         <label for="zoom">Zoom <strong id="zoomLabel">1.0×</strong></label><input id="zoom" type="range" min="1" max="10" step=".1" value="1">
