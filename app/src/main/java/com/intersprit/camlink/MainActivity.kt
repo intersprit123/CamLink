@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
                     val state = intent.getStringExtra(CameraStreamingService.EXTRA_SERVICE_STATE).orEmpty()
                     val message = intent.getStringExtra(CameraStreamingService.EXTRA_SERVICE_MESSAGE) ?: "Camera service status changed."
                     hostStatusView?.text = when (state) {
-                        "LIVE" -> "LIVE • http://${localIpAddress()}:8080\\n$message"
+                        "LIVE" -> "LIVE • http://${localIpAddress()}:8080\n$message"
                         "STARTING" -> "STARTING • $message"
                         else -> message
                     }
