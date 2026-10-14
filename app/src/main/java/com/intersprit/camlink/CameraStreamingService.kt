@@ -7,53 +7,132 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.ImageFormat
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.featuregroup.GroupableFeature.Companion.FPS_60
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
+import androidx.camera.core.SessionConfig
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.lifecycle.LifecycleService
 import androidx.core.content.ContextCompat
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class CameraStreamingService : LifecycleService() {
     private val latestJpeg = AtomicReference<ByteArray?>(null)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    // Reuse the large intermediate buffers; only immutable JPEG byte arrays are published to readers.
+    private var nv21Buffer = ByteArray(0)
+    private var rotatedNv21Buffer = ByteArray(0)
+    private val jpegOutput = ByteArrayOutputStream()
+    @Volatile private var captureWidth = 0
+    @Volatile private var captureHeight = 0
     private var server: FrameServer? = null
     private var provider: ProcessCameraProvider? = null
     @Volatile private var activeCamera: Camera? = null
     @Volatile private var torchEnabled = false
-    @Volatile private var jpegQuality = 85
-    @Volatile private var resolutionIndex = 2
-    private var lensFacing = CameraSelector.LENS_FACING_BACK
+    @Volatile private var jpegQuality = 75
+    // Favor smoothness and lower CPU/network cost by default; higher capture modes remain selectable.
+    @Volatile private var resolutionIndex = 1
+    @Volatile private var lensFacing = CameraSelector.LENS_FACING_BACK
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if (intent?.action == ACTION_CONTROL) {
+            val command = intent.getStringExtra(EXTRA_CONTROL_COMMAND).orEmpty()
+            val value = intent.getStringExtra(EXTRA_CONTROL_VALUE)
+
+            // A control request can restart a service that Android previously reclaimed.
+            // Recover the foreground sharing service instead of replying "not active" and
+            // dropping the first settings action.
+            if (server == null) {
+                try {
+                    startForegroundCompat()
+                    if (!ensureServerStarted()) {
+                        sendControlResult("Could not restart camera sharing. Tap Stop sharing, then Start camera sharing again.")
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                    startCamera()
+                } catch (e: Exception) {
+                    sendControlResult("Could not restart camera sharing: ${e.message ?: "unknown error"}")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+            }
+
+            applyControlWhenReady(command, value, 0)
+            return START_STICKY
+        }
         if (intent?.action == ACTION_SWITCH) {
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
             startCamera()
             return START_STICKY
         }
         startForegroundCompat()
-        if (server == null) {
-            try {
-                server = FrameServer(latestJpeg, ::handleWebControl).also { it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
-            } catch (_: Exception) {
-                stopSelf()
-                return START_NOT_STICKY
-            }
+        if (!ensureServerStarted()) {
+            stopSelf()
+            return START_NOT_STICKY
         }
         startCamera()
         return START_STICKY
+    }
+
+    private fun ensureServerStarted(): Boolean {
+        if (server != null) return true
+        return try {
+            server = FrameServer(latestJpeg, ::handleWebControl).also {
+                it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun sendControlResult(message: String) {
+        sendBroadcast(
+            Intent(ACTION_CONTROL_RESULT)
+                .setPackage(packageName)
+                .putExtra(EXTRA_CONTROL_RESULT_TEXT, message)
+        )
+    }
+
+    private fun applyControlWhenReady(command: String, value: String?, attempt: Int) {
+        if (server == null) {
+            sendControlResult("Camera sharing stopped before the setting could be applied.")
+            return
+        }
+
+        // These settings update service state and do not require an opened CameraX camera.
+        if (command == "jpeg" || command == "quality" || activeCamera != null) {
+            sendControlResult(handleWebControl(command, value))
+            return
+        }
+
+        if (attempt >= 25) {
+            sendControlResult("Camera is still starting. Wait for the live preview, then apply the setting again.")
+            return
+        }
+
+        mainHandler.postDelayed({ applyControlWhenReady(command, value, attempt + 1) }, 200)
     }
 
     private fun startForegroundCompat() {
@@ -84,6 +163,7 @@ class CameraStreamingService : LifecycleService() {
         }
     }
 
+    @OptIn(androidx.camera.core.ExperimentalSessionConfig::class)
     private fun startCamera() {
         val sizes = arrayOf(
             android.util.Size(640, 480),
@@ -100,13 +180,28 @@ class CameraStreamingService : LifecycleService() {
                 provider = cameraProvider
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_NV21)
                     .setTargetResolution(targetSize)
                     .build()
                 analysis.setAnalyzer(cameraExecutor) { image ->
-                    try { latestJpeg.set(imageToJpeg(image)) } catch (_: Exception) { } finally { image.close() }
+                    val startedNs = System.nanoTime()
+                    try {
+                        val jpeg = imageToJpeg(image)
+                        latestJpeg.set(jpeg)
+                        updateStreamMetrics(jpeg.size, System.nanoTime() - startedNs)
+                    } catch (_: Exception) {
+                    } finally {
+                        image.close()
+                    }
                 }
                 cameraProvider.unbindAll()
-                activeCamera = cameraProvider.bindToLifecycle(this, CameraSelector.Builder().requireLensFacing(lensFacing).build(), analysis)
+                val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                // Prefer 60 FPS where this camera/resolution combination supports it.
+                // CameraX falls back to a supported configuration instead of forcing 60 FPS.
+                val sessionConfig = SessionConfig.Builder(analysis)
+                    .setPreferredFeatureGroup(FPS_60)
+                    .build()
+                activeCamera = cameraProvider.bindToLifecycle(this, selector, sessionConfig)
                 torchEnabled = false
             } catch (_: Exception) {
                 stopSelf()
@@ -116,88 +211,261 @@ class CameraStreamingService : LifecycleService() {
 
 
     private fun handleWebControl(command: String, value: String?): String {
-        return when (command) {
-            "switch" -> {
-                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-                ContextCompat.getMainExecutor(this).execute { startCamera() }
-                "Switching camera"
+        return try {
+            when (command) {
+                "switch" -> {
+                    lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+                    ContextCompat.getMainExecutor(this).execute { startCamera() }
+                    "Switching camera"
+                }
+                "torch" -> {
+                    val camera = activeCamera ?: return "Camera is not ready"
+                    if (!camera.cameraInfo.hasFlashUnit()) return "Flashlight is not available on this camera"
+                    torchEnabled = !torchEnabled
+                    camera.cameraControl.enableTorch(torchEnabled)
+                    if (torchEnabled) "Flashlight on" else "Flashlight off"
+                }
+                "zoom" -> {
+                    val requested = value?.toFloatOrNull() ?: return "Invalid zoom value"
+                    val camera = activeCamera ?: return "Camera is not ready"
+                    val state = camera.cameraInfo.zoomState.value ?: return "Zoom is not available"
+                    val zoom = requested.coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                    camera.cameraControl.setZoomRatio(zoom)
+                    "Zoom set to %.1fx".format(zoom)
+                }
+                "focus" -> {
+                    val camera = activeCamera ?: return "Camera is not ready"
+                    val point = SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)
+                    val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                        .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                        .build()
+                    if (!camera.cameraInfo.isFocusMeteringSupported(action)) {
+                        return "Autofocus metering is not supported by this camera"
+                    }
+                    camera.cameraControl.startFocusAndMetering(action)
+                    "Center autofocus requested"
+                }
+                "exposure" -> {
+                    val requested = value?.toIntOrNull() ?: return "Invalid exposure compensation"
+                    val camera = activeCamera ?: return "Camera is not ready"
+                    val exposure = camera.cameraInfo.exposureState
+                    if (!exposure.isExposureCompensationSupported) return "Exposure compensation is not supported by this camera"
+                    val index = requested.coerceIn(
+                        exposure.exposureCompensationRange.lower,
+                        exposure.exposureCompensationRange.upper
+                    )
+                    camera.cameraControl.setExposureCompensationIndex(index)
+                    "Exposure compensation set to $index steps"
+                }
+                "whitebalance" -> {
+                    val camera = activeCamera ?: return "Camera is not ready"
+                    val requested = value?.lowercase()?.trim() ?: "auto"
+                    val modes = mapOf(
+                        "auto" to CaptureRequest.CONTROL_AWB_MODE_AUTO,
+                        "daylight" to CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT,
+                        "cloudy" to CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT,
+                        "incandescent" to CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT,
+                        "fluorescent" to CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT
+                    )
+                    val mode = modes[requested] ?: return "Unknown white-balance mode"
+                    val supported = Camera2CameraInfo.from(camera.cameraInfo)
+                        .getCameraCharacteristic(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)
+                    if (supported == null || !supported.contains(mode)) {
+                        return "White balance mode '$requested' is not supported by this camera"
+                    }
+                    val options = CaptureRequestOptions.Builder()
+                        .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, mode)
+                        .build()
+                    Camera2CameraControl.from(camera.cameraControl).setCaptureRequestOptions(options)
+                    "White balance set to $requested"
+                }
+                "quality" -> {
+                    val requested = value?.toIntOrNull() ?: return "Invalid quality setting"
+                    resolutionIndex = requested.coerceIn(0, 4)
+                    ContextCompat.getMainExecutor(this).execute { startCamera() }
+                    val labels = arrayOf("480p", "720p", "1080p", "1440p / 2K", "2160p / 4K")
+                    "Requested ${labels[resolutionIndex]}. Actual resolution depends on camera support."
+                }
+                "jpeg" -> {
+                    val requested = value?.toIntOrNull() ?: return "Invalid JPEG quality"
+                    jpegQuality = requested.coerceIn(50, 95)
+                    "JPEG quality set to $jpegQuality%"
+                }
+                else -> "Unknown command"
             }
-            "torch" -> {
-                val camera = activeCamera ?: return "Camera is not ready"
-                if (!camera.cameraInfo.hasFlashUnit()) return "Flashlight is not available on this camera"
-                torchEnabled = !torchEnabled
-                camera.cameraControl.enableTorch(torchEnabled)
-                if (torchEnabled) "Flashlight on" else "Flashlight off"
-            }
-            "zoom" -> {
-                val requested = value?.toFloatOrNull() ?: return "Invalid zoom value"
-                val camera = activeCamera ?: return "Camera is not ready"
-                val state = camera.cameraInfo.zoomState.value ?: return "Zoom is not available"
-                val zoom = requested.coerceIn(state.minZoomRatio, state.maxZoomRatio)
-                camera.cameraControl.setZoomRatio(zoom)
-                "Zoom set to %.1fx".format(zoom)
-            }
-            "quality" -> {
-                val requested = value?.toIntOrNull() ?: return "Invalid quality setting"
-                resolutionIndex = requested.coerceIn(0, 4)
-                ContextCompat.getMainExecutor(this).execute { startCamera() }
-                val labels = arrayOf("480p", "720p", "1080p", "1440p / 2K", "2160p / 4K")
-                "Requested ${labels[resolutionIndex]}. Actual resolution depends on camera support."
-            }
-            "jpeg" -> {
-                val requested = value?.toIntOrNull() ?: return "Invalid JPEG quality"
-                jpegQuality = requested.coerceIn(50, 95)
-                "JPEG quality set to $jpegQuality%"
-            }
-            else -> "Unknown command"
+        } catch (e: Exception) {
+            "Control failed: ${e.message ?: "camera may not support this setting"}"
         }
     }
 
     private fun imageToJpeg(image: androidx.camera.core.ImageProxy): ByteArray {
-        val y = image.planes[0].buffer
-        val u = image.planes[1].buffer
-        val v = image.planes[2].buffer
         val width = image.width
         val height = image.height
-        val nv21 = ByteArray(width * height * 3 / 2)
-        var pos = 0
-        val yp = image.planes[0]
-        for (row in 0 until height) for (col in 0 until width) nv21[pos++] = y.get(row * yp.rowStride + col * yp.pixelStride)
-        val up = image.planes[1]
-        val vp = image.planes[2]
-        for (row in 0 until height / 2) for (col in 0 until width / 2) {
-            nv21[pos++] = v.get(row * vp.rowStride + col * vp.pixelStride)
-            nv21[pos++] = u.get(row * up.rowStride + col * up.pixelStride)
-        }
-        val output = ByteArrayOutputStream()
-        YuvImage(nv21, ImageFormat.NV21, width, height, null).compressToJpeg(Rect(0, 0, width, height), jpegQuality, output)
-        val jpeg = output.toByteArray()
-        val rotation = image.imageInfo.rotationDegrees
-        if (rotation == 0) return jpeg
+        val requiredSize = width * height * 3 / 2
+        if (nv21Buffer.size != requiredSize) nv21Buffer = ByteArray(requiredSize)
+        val nv21 = nv21Buffer
+        var destinationOffset = 0
 
-        // ImageAnalysis buffers can be landscape even when the phone is held vertically.
-        // Rotate each frame so viewers match the phone's current orientation.
-        val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return jpeg
-        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
-        val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        val rotatedOutput = ByteArrayOutputStream()
-        rotated.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, rotatedOutput)
-        if (rotated !== bitmap) bitmap.recycle()
-        rotated.recycle()
-        return rotatedOutput.toByteArray()
+        val yPlane = image.planes[0]
+        val yBuffer = yPlane.buffer.duplicate()
+        if (yPlane.pixelStride == 1 && yPlane.rowStride >= width) {
+            // Bulk-copy each luma row instead of doing a bounds-checked get for every pixel.
+            for (row in 0 until height) {
+                yBuffer.position(row * yPlane.rowStride)
+                yBuffer.get(nv21, destinationOffset, width)
+                destinationOffset += width
+            }
+        } else {
+            for (row in 0 until height) {
+                for (col in 0 until width) {
+                    nv21[destinationOffset++] = yBuffer.get(row * yPlane.rowStride + col * yPlane.pixelStride)
+                }
+            }
+        }
+
+        val uPlane = image.planes[1]
+        val vPlane = image.planes[2]
+        val u = uPlane.buffer.duplicate()
+        val v = vPlane.buffer.duplicate()
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+
+        // CameraX 1.5+ NV21 output provides VU-interleaved chroma on plane 2.
+        // Copy whole chroma rows when available; retain a stride-aware fallback for devices
+        // which expose an unexpected plane layout.
+        val contiguousVu = vPlane.pixelStride == 2 &&
+            vPlane.rowStride >= width &&
+            (chromaHeight == 0 || ((chromaHeight - 1) * vPlane.rowStride + width) <= v.limit())
+
+        if (contiguousVu) {
+            for (row in 0 until chromaHeight) {
+                v.position(row * vPlane.rowStride)
+                v.get(nv21, destinationOffset, width)
+                destinationOffset += width
+            }
+        } else {
+            for (row in 0 until chromaHeight) {
+                for (col in 0 until chromaWidth) {
+                    nv21[destinationOffset++] = v.get(row * vPlane.rowStride + col * vPlane.pixelStride)
+                    nv21[destinationOffset++] = u.get(row * uPlane.rowStride + col * uPlane.pixelStride)
+                }
+            }
+        }
+
+        val rotation = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
+        val encodedWidth = if (rotation == 90 || rotation == 270) height else width
+        val encodedHeight = if (rotation == 90 || rotation == 270) width else height
+        val encodedData = if (rotation == 0) nv21 else rotateNv21(nv21, width, height, rotation)
+
+        // Rotate the YUV buffer directly; never decode each frame into a Bitmap.
+        jpegOutput.reset()
+        YuvImage(encodedData, ImageFormat.NV21, encodedWidth, encodedHeight, null)
+            .compressToJpeg(Rect(0, 0, encodedWidth, encodedHeight), jpegQuality, jpegOutput)
+        captureWidth = encodedWidth
+        captureHeight = encodedHeight
+        return jpegOutput.toByteArray()
+    }
+
+    private fun rotateNv21(source: ByteArray, width: Int, height: Int, rotation: Int): ByteArray {
+        if (rotatedNv21Buffer.size != source.size) rotatedNv21Buffer = ByteArray(source.size)
+        val destination = rotatedNv21Buffer
+        val outputWidth = if (rotation == 90 || rotation == 270) height else width
+        val outputHeight = if (rotation == 90 || rotation == 270) width else height
+
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val dx: Int
+                val dy: Int
+                when (rotation) {
+                    90 -> { dx = height - 1 - y; dy = x }
+                    180 -> { dx = width - 1 - x; dy = height - 1 - y }
+                    270 -> { dx = y; dy = width - 1 - x }
+                    else -> { dx = x; dy = y }
+                }
+                destination[dy * outputWidth + dx] = source[y * width + x]
+            }
+        }
+
+        val sourceChromaWidth = width / 2
+        val sourceChromaHeight = height / 2
+        val destinationChromaWidth = outputWidth / 2
+        val sourceChromaOffset = width * height
+        val destinationChromaOffset = outputWidth * outputHeight
+        for (y in 0 until sourceChromaHeight) {
+            for (x in 0 until sourceChromaWidth) {
+                val dx: Int
+                val dy: Int
+                when (rotation) {
+                    90 -> { dx = sourceChromaHeight - 1 - y; dy = x }
+                    180 -> { dx = sourceChromaWidth - 1 - x; dy = sourceChromaHeight - 1 - y }
+                    270 -> { dx = y; dy = sourceChromaWidth - 1 - x }
+                    else -> { dx = x; dy = y }
+                }
+                val from = sourceChromaOffset + (y * sourceChromaWidth + x) * 2
+                val to = destinationChromaOffset + (dy * destinationChromaWidth + dx) * 2
+                destination[to] = source[from]
+                destination[to + 1] = source[from + 1]
+            }
+        }
+        return destination
+    }
+
+    private var statsWindowStartedNs = System.nanoTime()
+    private var statsWindowFrames = 0L
+    private var statsWindowBytes = 0L
+
+    private fun updateStreamMetrics(jpegBytes: Int, encodeNanos: Long) {
+        streamEncodeMs = encodeNanos / 1_000_000.0
+        streamFrameWidth = captureWidth
+        streamFrameHeight = captureHeight
+        streamJpegQuality = jpegQuality
+        statsWindowFrames++
+        statsWindowBytes += jpegBytes
+        val now = System.nanoTime()
+        val elapsedNs = now - statsWindowStartedNs
+        if (elapsedNs >= 1_000_000_000L) {
+            streamFps = statsWindowFrames * 1_000_000_000.0 / elapsedNs
+            streamBitrateMbps = statsWindowBytes * 8_000.0 / elapsedNs
+            statsWindowFrames = 0L
+            statsWindowBytes = 0L
+            statsWindowStartedNs = now
+        }
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         try { provider?.unbindAll() } catch (_: Exception) { }
         activeCamera = null
         try { server?.stop() } catch (_: Exception) { }
         cameraExecutor.shutdown()
         latestJpeg.set(null)
+        streamFps = 0.0
+        streamEncodeMs = 0.0
+        streamBitrateMbps = 0.0
+        streamFrameWidth = 0
+        streamFrameHeight = 0
         super.onDestroy()
     }
 
     companion object {
         const val ACTION_SWITCH = "com.intersprit.camlink.SWITCH_CAMERA"
+        const val ACTION_CONTROL = "com.intersprit.camlink.CONTROL_CAMERA"
+        const val ACTION_CONTROL_RESULT = "com.intersprit.camlink.CONTROL_CAMERA_RESULT"
+        const val EXTRA_CONTROL_COMMAND = "com.intersprit.camlink.EXTRA_CONTROL_COMMAND"
+        const val EXTRA_CONTROL_VALUE = "com.intersprit.camlink.EXTRA_CONTROL_VALUE"
+        const val EXTRA_CONTROL_RESULT_TEXT = "com.intersprit.camlink.EXTRA_CONTROL_RESULT_TEXT"
+        @Volatile var streamFps: Double = 0.0
+        @Volatile var streamEncodeMs: Double = 0.0
+        @Volatile var streamBitrateMbps: Double = 0.0
+        @Volatile var streamFrameWidth: Int = 0
+        @Volatile var streamFrameHeight: Int = 0
+        @Volatile var streamJpegQuality: Int = 75
+        fun statsJsonForViewer(): String = String.format(
+            java.util.Locale.US,
+            "{\"fps\":%.1f,\"encodeMs\":%.2f,\"bitrateMbps\":%.2f,\"width\":%d,\"height\":%d,\"jpegQuality\":%d}",
+            streamFps, streamEncodeMs, streamBitrateMbps,
+            streamFrameWidth, streamFrameHeight, streamJpegQuality
+        )
         private const val NOTIFICATION_ID = 812
     }
 }
