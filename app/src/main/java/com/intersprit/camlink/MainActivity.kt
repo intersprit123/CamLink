@@ -73,8 +73,26 @@ class MainActivity : ComponentActivity() {
     private var controlReceiverRegistered = false
     private val controlResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            hostControlStatusView?.text = intent?.getStringExtra(CameraStreamingService.EXTRA_CONTROL_RESULT_TEXT)
-                ?: "Control request completed"
+            when (intent?.action) {
+                CameraStreamingService.ACTION_SERVICE_STATUS -> {
+                    val state = intent.getStringExtra(CameraStreamingService.EXTRA_SERVICE_STATE).orEmpty()
+                    val message = intent.getStringExtra(CameraStreamingService.EXTRA_SERVICE_MESSAGE) ?: "Camera service status changed."
+                    hostStatusView?.text = when (state) {
+                        "LIVE" -> "LIVE • http://${localIpAddress()}:8080\n$message"
+                        "STARTING" -> "STARTING • $message"
+                        else -> message
+                    }
+                    if (state == "ERROR") {
+                        hosting = false
+                        stopHostMetrics()
+                        hostControlStatusView?.text = "Sharing failed. Fix the reported error, then tap Start again."
+                    }
+                }
+                CameraStreamingService.ACTION_CONTROL_RESULT -> {
+                    hostControlStatusView?.text = intent.getStringExtra(CameraStreamingService.EXTRA_CONTROL_RESULT_TEXT)
+                        ?: "Control request completed"
+                }
+            }
         }
     }
 
@@ -420,11 +438,9 @@ class MainActivity : ComponentActivity() {
             hostPreviewWebView?.loadDataWithBaseURL(
                 "http://127.0.0.1:8080/", localHostPreviewHtml(), "text/html", "UTF-8", null
             )
-            val ip = localIpAddress()
-            status.text = "LIVE • http://$ip:8080\nStreaming continues in the background."
-            hostControlStatusView?.text = "MAX defaults: 720p · JPEG 75% · prefer 60 FPS when supported."
-            startHostMetrics()
-            Toast.makeText(this, "Background camera sharing started", Toast.LENGTH_SHORT).show()
+            status.text = "STARTING • Waiting for CameraX to open the camera…"
+            hostControlStatusView?.text = "Starting camera service…"
+            Toast.makeText(this, "Starting camera sharing…", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             status.text = "Could not start sharing: ${e.message ?: "unknown error"}"
         }
@@ -642,7 +658,10 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
             ContextCompat.registerReceiver(
                 this,
                 controlResultReceiver,
-                IntentFilter(CameraStreamingService.ACTION_CONTROL_RESULT),
+                IntentFilter().apply {
+                    addAction(CameraStreamingService.ACTION_CONTROL_RESULT)
+                    addAction(CameraStreamingService.ACTION_SERVICE_STATUS)
+                },
                 ContextCompat.RECEIVER_NOT_EXPORTED
             )
             controlReceiverRegistered = true
