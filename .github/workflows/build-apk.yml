@@ -2,7 +2,7 @@ name: Build CamLink APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "camera-startup-recovery" ]
   workflow_dispatch:
 
 permissions:
