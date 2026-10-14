@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -88,9 +89,11 @@ class CameraStreamingService : LifecycleService() {
         }
         startForegroundCompat()
         if (!ensureServerStarted()) {
+            sendServiceStatus("ERROR", "Could not start the camera-sharing server on port 8080.")
             stopSelf()
             return START_NOT_STICKY
         }
+        sendServiceStatus("STARTING", "Server started. Opening camera…")
         startCamera()
         return START_STICKY
     }
@@ -102,9 +105,21 @@ class CameraStreamingService : LifecycleService() {
                 it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             }
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not start HTTP frame server on port 8080", e)
+            sendServiceStatus("ERROR", "HTTP server failed to start: ${e.message ?: e.javaClass.simpleName}")
+            server = null
             false
         }
+    }
+
+    private fun sendServiceStatus(state: String, message: String) {
+        sendBroadcast(
+            Intent(ACTION_SERVICE_STATUS)
+                .setPackage(packageName)
+                .putExtra(EXTRA_SERVICE_STATE, state)
+                .putExtra(EXTRA_SERVICE_MESSAGE, message)
+        )
     }
 
     private fun sendControlResult(message: String) {
@@ -198,12 +213,25 @@ class CameraStreamingService : LifecycleService() {
                 val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
                 // Prefer 60 FPS where this camera/resolution combination supports it.
                 // CameraX falls back to a supported configuration instead of forcing 60 FPS.
-                val sessionConfig = SessionConfig.Builder(analysis)
-                    .setPreferredFeatureGroup(FPS_60)
-                    .build()
-                activeCamera = cameraProvider.bindToLifecycle(this, selector, sessionConfig)
+                // Try the preferred 60 FPS session first, but do not let an optional
+                // feature-group configuration prevent camera sharing on older or unusual devices.
+                activeCamera = try {
+                    val sessionConfig = SessionConfig.Builder(analysis)
+                        .setPreferredFeatureGroup(FPS_60)
+                        .build()
+                    cameraProvider.bindToLifecycle(this, selector, sessionConfig)
+                } catch (preferredError: Exception) {
+                    Log.w(TAG, "Preferred 60 FPS session failed; retrying with standard CameraX binding", preferredError)
+                    cameraProvider.unbindAll()
+                    cameraProvider.bindToLifecycle(this, selector, analysis)
+                }
                 torchEnabled = false
-            } catch (_: Exception) {
+                sendServiceStatus("LIVE", "Camera opened. Sharing at ${targetSize.width}x${targetSize.height}.")
+                Log.i(TAG, "Camera sharing is live at ${targetSize.width}x${targetSize.height}")
+            } catch (e: Exception) {
+                activeCamera = null
+                Log.e(TAG, "CameraX failed to bind the camera", e)
+                sendServiceStatus("ERROR", "Camera failed to start: ${e.message ?: e.javaClass.simpleName}")
                 stopSelf()
             }
         }, ContextCompat.getMainExecutor(this))
@@ -451,6 +479,10 @@ class CameraStreamingService : LifecycleService() {
         const val ACTION_SWITCH = "com.intersprit.camlink.SWITCH_CAMERA"
         const val ACTION_CONTROL = "com.intersprit.camlink.CONTROL_CAMERA"
         const val ACTION_CONTROL_RESULT = "com.intersprit.camlink.CONTROL_CAMERA_RESULT"
+        const val ACTION_SERVICE_STATUS = "com.intersprit.camlink.CAMERA_SERVICE_STATUS"
+        const val EXTRA_SERVICE_STATE = "com.intersprit.camlink.EXTRA_SERVICE_STATE"
+        const val EXTRA_SERVICE_MESSAGE = "com.intersprit.camlink.EXTRA_SERVICE_MESSAGE"
+        private const val TAG = "CamLinkCameraService"
         const val EXTRA_CONTROL_COMMAND = "com.intersprit.camlink.EXTRA_CONTROL_COMMAND"
         const val EXTRA_CONTROL_VALUE = "com.intersprit.camlink.EXTRA_CONTROL_VALUE"
         const val EXTRA_CONTROL_RESULT_TEXT = "com.intersprit.camlink.EXTRA_CONTROL_RESULT_TEXT"
