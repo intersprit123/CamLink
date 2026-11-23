@@ -64,6 +64,11 @@ for label, client in (("local host preview", host_preview), ("Android remote vie
     check(f"{label} uses load/error-driven sequential polling", "function pollFrame()" in client and
           "feed.onload" in client and "feed.onerror" in client and "setTimeout(pollFrame" in client)
     check(f"{label} does not request /stream", "/stream" not in client)
+check("all Android /frame viewers target a 16 ms frame interval",
+      MAIN.count("setTimeout(pollFrame,16)") == 3)
+check("CameraX prefers 60 FPS and discards stale analysis frames",
+      "setPreferredFeatureGroup(FPS_60)" in SERVICE and
+      "ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST" in SERVICE)
 check("remote viewer enables CORS for canvas snapshots", 'crossorigin="anonymous"' in remote_viewer and
       'crossorigin="anonymous"' in embedded_viewer)
 check("server retains /stream only as a compatibility endpoint", '"/stream" ->' in MAIN)
