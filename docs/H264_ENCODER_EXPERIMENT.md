@@ -1,25 +1,21 @@
-# Experimental hardware H.264 encoder test
+# Hardware H.264 streaming prototype
 
-This experiment is isolated on `test/camera2-fps-capabilities`. It does not change the default stream protocol.
+This implementation is isolated on `feature/h264-streaming-mediacodec`. The existing JPEG `/frame` and `/stream` endpoints remain available as compatibility paths.
 
 ## What it measures
 
-When enabled, CameraX sends the same camera session to:
-- the existing `ImageAnalysis` path, which continues producing JPEG frames for `/frame`;
-- an additional `Preview` surface connected to Android `MediaCodec` using the AVC/H.264 MIME type.
-
-The encoded H.264 access units are measured and discarded. They are **not** sent to Windows yet, so the current Windows viewer and `/frame` endpoint remain unchanged.
+When enabled, CameraX sends frames to a `Preview` surface connected directly to Android `MediaCodec` using the AVC/H.264 MIME type. The service publishes codec configuration and encoded access units as an Annex-B byte stream at `/h264`. A bounded queue drops old access units when the viewer falls behind. JPEG conversion is skipped while H.264 is active to reduce CPU load; the JPEG endpoint remains available as a compatibility route but does not receive fresh frames during H.264 mode.
 
 The encoder is selected from hardware AVC encoders that report support for the requested size (falling back to 720p or 480p) at 30 FPS or 15 FPS. Devices that do not report a usable hardware encoder return an error in `/stats`; this test does not silently switch to a software encoder.
 
 ## Run the test
 
 1. Start CamLink camera sharing on the Android phone.
-2. From a browser on the same trusted Wi-Fi network, enable the test:
+2. The Windows viewer's **H.264 · MediaCodec** mode enables the encoder automatically. To enable it manually, open this URL on the same trusted network:
 
    `http://PHONE_IP:8080/control?cmd=h264test&value=on`
 
-3. Read the live metrics:
+3. The Annex-B stream is available at `http://PHONE_IP:8080/h264`. Read the live metrics at:
 
    `http://PHONE_IP:8080/stats`
 
@@ -40,6 +36,6 @@ The encoder is selected from hardware AVC encoders that report support for the r
 
 ## How to compare
 
-Record a 30-second JPEG-only baseline first. Then enable H.264, wait a few seconds for the camera session to settle, and record another 30-second sample. Compare actual JPEG FPS/encode time alongside H.264 FPS/bitrate/average frame size. The two pipelines run concurrently during this experiment, so this test measures encoder capability and overhead; it is not yet a fair measurement of the final H.264-only streaming pipeline.
+Record a 30-second JPEG-only baseline first. Then enable H.264, wait a few seconds for the camera session to settle, and record another 30-second sample. Compare actual JPEG FPS/encode time alongside H.264 FPS/bitrate/average frame size. H.264 mode skips JPEG conversion to reduce duplicate processing. Compare delivered Windows FPS with the Android `h264Fps` metric; they are different measurements.
 
-Do not merge this experiment into `main` until it has been tested on physical devices. No Windows H.264 decoder or H.264 network transport is included in this first benchmark.
+This is an early single-viewer prototype. Validate Annex-B framing, reconnect behavior, encoder lifecycle, sustained thermal performance, and end-to-end latency on physical devices before merging into `main`. The desktop decoder uses PyAV/FFmpeg; hardware decoding depends on the Windows FFmpeg build and available codecs.
