@@ -66,7 +66,6 @@ class CameraStreamingService : LifecycleService() {
     @Volatile private var h264Encoder: MediaCodec? = null
     @Volatile private var h264InputSurface: Surface? = null
     @Volatile private var h264EncoderThread: HandlerThread? = null
-    @Volatile private var h264EncoderName = ""
     private var h264Preview: Preview? = null
     private var h264StatsWindowStartedNs = System.nanoTime()
     private var h264StatsWindowFrames = 0L
@@ -236,10 +235,13 @@ class CameraStreamingService : LifecycleService() {
                         .filter { it.upper <= 60 }
                         .maxByOrNull { it.upper }
 
-                val sessionConfig = if (selectedRange != null) {
+                val sessionBuilder = if (encoderPreview != null) {
+                    SessionConfig.Builder(analysis, encoderPreview)
+                } else {
                     SessionConfig.Builder(analysis)
-                        .setFrameRateRange(selectedRange)
-                        .build()
+                }
+                val sessionConfig = if (selectedRange != null) {
+                    sessionBuilder.setFrameRateRange(selectedRange).build()
                 } else {
                     // Let CameraX choose its normal default if no guaranteed range is exposed.
                     baseSessionConfig
@@ -490,7 +492,6 @@ class CameraStreamingService : LifecycleService() {
             h264Encoder = codec
             h264InputSurface = inputSurface
             h264EncoderThread = callbackThread
-            h264EncoderName = choice.info.name
             streamH264Codec = choice.info.name
             streamH264Hardware = choice.hardware
             streamH264Width = choice.size.width
@@ -554,7 +555,6 @@ class CameraStreamingService : LifecycleService() {
         try { codec?.release() } catch (_: Exception) { }
         h264EncoderThread?.quitSafely()
         h264EncoderThread = null
-        h264EncoderName = ""
         streamH264Enabled = false
         streamH264Codec = ""
         streamH264Hardware = false
