@@ -205,9 +205,13 @@ class CameraStreamingService : LifecycleService() {
                 analysis.setAnalyzer(cameraExecutor) { image ->
                     val startedNs = System.nanoTime()
                     try {
-                        val jpeg = imageToJpeg(image)
-                        latestJpeg.set(jpeg)
-                        updateStreamMetrics(jpeg.size, System.nanoTime() - startedNs)
+                        // MediaCodec receives camera frames directly through its Surface.
+                        // Avoid the expensive parallel JPEG conversion while H.264 is active.
+                        if (!h264TestEnabled) {
+                            val jpeg = imageToJpeg(image)
+                            latestJpeg.set(jpeg)
+                            updateStreamMetrics(jpeg.size, System.nanoTime() - startedNs)
+                        }
                     } catch (_: Exception) {
                     } finally {
                         image.close()
@@ -452,9 +456,17 @@ class CameraStreamingService : LifecycleService() {
             ?: throw IllegalStateException(
                 "No hardware AVC encoder supports ${requestedSize.width}x${requestedSize.height}, 720p, or 480p"
             )
+        val targetBitrate = when {
+            choice.size.width >= 3840 -> 20_000_000
+            choice.size.width >= 2560 -> 12_000_000
+            choice.size.width >= 1920 -> 8_000_000
+            choice.size.width >= 1280 -> 4_000_000
+            else -> 1_500_000
+        }
         val format = MediaFormat.createVideoFormat(mime, choice.size.width, choice.size.height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, if (choice.size.width >= 1280) 2_500_000 else 1_000_000)
+            setInteger(MediaFormat.KEY_BIT_RATE, targetBitrate)
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
             setInteger(MediaFormat.KEY_FRAME_RATE, choice.frameRate)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
@@ -471,8 +483,22 @@ class CameraStreamingService : LifecycleService() {
                     info: MediaCodec.BufferInfo
                 ) {
                     try {
-                        if (info.size > 0 && (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
-                            updateH264Metrics(info.size, info.presentationTimeUs)
+                        if (info.size > 0) {
+                            val output = codec.getOutputBuffer(index)
+                            if (output != null) {
+                                val sample = output.duplicate().apply {
+                                    position(info.offset)
+                                    limit(info.offset + info.size)
+                                }
+                                val bytes = ByteArray(sample.remaining())
+                                sample.get(bytes)
+                                if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                                    H264StreamHub.publishCodecConfig(bytes)
+                                } else {
+                                    H264StreamHub.publishAccessUnit(bytes)
+                                    updateH264Metrics(info.size, info.presentationTimeUs)
+                                }
+                            }
                         }
                     } finally {
                         try { codec.releaseOutputBuffer(index, false) } catch (_: Exception) { }
@@ -483,11 +509,17 @@ class CameraStreamingService : LifecycleService() {
                     streamH264Error = exception.message ?: "Hardware H.264 encoder failed"
                 }
 
-                override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) = Unit
+                override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+                    H264StreamHub.publishCodecConfig(
+                        copyCodecBuffer(format.getByteBuffer("csd-0")),
+                        copyCodecBuffer(format.getByteBuffer("csd-1"))
+                    )
+                }
             }, Handler(callbackThread.looper))
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val inputSurface = codec.createInputSurface()
             codec.start()
+            H264StreamHub.start()
 
             h264Encoder = codec
             h264InputSurface = inputSurface
@@ -526,6 +558,12 @@ class CameraStreamingService : LifecycleService() {
             }
     }
 
+    private fun copyCodecBuffer(buffer: java.nio.ByteBuffer?): ByteArray? {
+        if (buffer == null) return null
+        val duplicate = buffer.duplicate()
+        return ByteArray(duplicate.remaining()).also { duplicate.get(it) }
+    }
+
     private fun updateH264Metrics(encodedBytes: Int, presentationTimeUs: Long) {
         h264StatsWindowFrames++
         h264StatsWindowBytes += encodedBytes
@@ -548,6 +586,7 @@ class CameraStreamingService : LifecycleService() {
     }
 
     private fun stopH264Encoder() {
+        H264StreamHub.stop()
         val codec = h264Encoder
         h264Encoder = null
         h264InputSurface = null
