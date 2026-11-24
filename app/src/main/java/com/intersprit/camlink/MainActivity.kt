@@ -815,6 +815,15 @@ class FrameServer(
 
     override fun serve(session: IHTTPSession): Response {
         return when (session.uri) {
+            "/h264" -> if (!H264StreamHub.enabled) {
+                newFixedLengthResponse(Response.Status.SERVICE_UNAVAILABLE, "text/plain", "Hardware H.264 encoder is not active")
+            } else {
+                newChunkedResponse(Response.Status.OK, "video/h264", H264StreamHub.openStream()).apply {
+                    addHeader("Cache-Control", "no-store, no-cache, must-revalidate")
+                    addHeader("Access-Control-Allow-Origin", "*")
+                    addHeader("Connection", "close")
+                }
+            }
             "/stream" -> newChunkedResponse(Response.Status.OK, "multipart/x-mixed-replace; boundary=frame", mjpegStream()).apply {
                 addHeader("Cache-Control", "no-store, no-cache, must-revalidate")
                 addHeader("Access-Control-Allow-Origin", "*")
