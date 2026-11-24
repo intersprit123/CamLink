@@ -2,7 +2,7 @@ name: Build CamLink APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "test/camera2-fps-capabilities" ]
   workflow_dispatch:
 
 permissions:
