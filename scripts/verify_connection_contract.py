@@ -97,25 +97,7 @@ check("H.264 experiment leaves the existing JPEG /frame pipeline intact",
       "latestJpeg.set(jpeg)" in SERVICE and
       '"image/jpeg"' in frame_route and "latestFrame.get()" in frame_route)
 
-# Experimental H.264 hardware-encoder measurement path.
-check("H.264 benchmark can be toggled through /control",
-      '"h264test" ->' in SERVICE and "setH264TestEnabled(enabled)" in SERVICE)
-check("H.264 test selects an AVC hardware encoder",
-      "MediaFormat.MIMETYPE_VIDEO_AVC" in SERVICE and
-      "info.isHardwareAccelerated" in SERVICE and
-      "MediaCodec.createByCodecName" in SERVICE)
-check("H.264 test uses a MediaCodec input Surface",
-      "MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface" in SERVICE and
-      "codec.createInputSurface()" in SERVICE)
-check("CameraX binds the encoder Preview and JPEG analyzer together",
-      "SessionConfig.Builder(analysis, encoderPreview)" in SERVICE and
-      "Preview.Builder()" in SERVICE)
-check("H.264 encoder output metrics are exposed through /stats",
-      "h264Fps" in SERVICE and "h264BitrateMbps" in SERVICE and
-      "h264AverageFrameKb" in SERVICE and "h264LatencyMs" in SERVICE)
-check("H.264 experiment leaves the existing JPEG /frame pipeline intact",
-      "latestJpeg.set(jpeg)" in SERVICE and
-      '"image/jpeg"' in frame_route and "latestFrame.get()" in frame_route)
+
 check("remote viewer enables CORS for canvas snapshots", 'crossorigin="anonymous"' in remote_viewer and
       'crossorigin="anonymous"' in embedded_viewer)
 check("server retains /stream only as a compatibility endpoint", '"/stream" ->' in MAIN)
