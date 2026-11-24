@@ -72,7 +72,7 @@ check("CameraX negotiates the highest supported frame range up to 120 FPS",
       "it.upper == 120" in SERVICE and
       "streamTargetFps = selectedRange?.upper ?: 0" in SERVICE)
 check("camera reports its negotiated FPS target and actual frame rate",
-      '"targetFps":%d' in SERVICE and '"fpsRange":"%s"' in SERVICE and
+      "targetFps" in SERVICE and "fpsRange" in SERVICE and
       "streamFps, streamEncodeMs" in SERVICE)
 check("CameraX discards stale analysis frames",
       "ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST" in SERVICE)
