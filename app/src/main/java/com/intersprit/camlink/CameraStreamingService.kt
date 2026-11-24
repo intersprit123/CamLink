@@ -60,8 +60,8 @@ class CameraStreamingService : LifecycleService() {
     @Volatile private var resolutionIndex = 1
     @Volatile private var lensFacing = CameraSelector.LENS_FACING_BACK
 
-    // Experimental H.264 path: CameraX Preview feeds a hardware MediaCodec input Surface.
-    // The encoded access units are measured and discarded for now; /frame remains JPEG.
+    // H.264 path: CameraX Preview feeds a hardware MediaCodec input Surface.
+    // Encoded Annex-B access units are streamed from /h264; /frame remains the JPEG fallback.
     @Volatile private var h264TestEnabled = false
     @Volatile private var h264Encoder: MediaCodec? = null
     @Volatile private var h264InputSurface: Surface? = null
@@ -518,8 +518,8 @@ class CameraStreamingService : LifecycleService() {
             }, Handler(callbackThread.looper))
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val inputSurface = codec.createInputSurface()
-            codec.start()
             H264StreamHub.start()
+            codec.start()
 
             h264Encoder = codec
             h264InputSurface = inputSurface
