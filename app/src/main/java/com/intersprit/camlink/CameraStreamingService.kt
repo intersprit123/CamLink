@@ -254,7 +254,7 @@ class CameraStreamingService : LifecycleService() {
                 if (h264TestEnabled) {
                     streamH264Error = e.message ?: "Camera could not attach the H.264 encoder surface"
                     h264TestEnabled = false
-                    try { cameraProvider.unbindAll() } catch (_: Exception) { }
+                    try { provider?.unbindAll() } catch (_: Exception) { }
                     stopH264Encoder()
                     h264Preview = null
                     startCamera()
