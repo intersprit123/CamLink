@@ -90,6 +90,15 @@ check("H.264 test uses a MediaCodec input Surface",
 check("CameraX binds the encoder Preview and JPEG analyzer together",
       "SessionConfig.Builder(analysis, encoderPreview)" in SERVICE and
       "Preview.Builder()" in SERVICE)
+check("MediaCodec H.264 access units are published to the bounded stream hub",
+      "H264StreamHub.publishAccessUnit(bytes)" in SERVICE and
+      "H264StreamHub.publishCodecConfig(" in SERVICE and
+      "LinkedBlockingDeque<ByteArray>" in (ROOT / "app/src/main/java/com/intersprit/camlink/H264StreamHub.kt").read_text(encoding="utf-8"))
+check("HTTP exposes the continuous Annex-B H.264 endpoint",
+      '"/h264" ->' in MAIN and '"video/h264"' in MAIN and
+      "H264StreamHub.openStream()" in MAIN)
+check("H.264 mode avoids simultaneous full-rate JPEG conversion",
+      "if (!h264TestEnabled)" in SERVICE and "imageToJpeg(image)" in SERVICE)
 check("H.264 encoder output metrics are exposed through /stats",
       "h264Fps" in SERVICE and "h264BitrateMbps" in SERVICE and
       "h264AverageFrameKb" in SERVICE and "h264LatencyMs" in SERVICE)
