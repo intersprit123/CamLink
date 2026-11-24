@@ -15,10 +15,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Range
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.featuregroup.GroupableFeature.Companion.FPS_60
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.SessionConfig
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
@@ -196,11 +196,32 @@ class CameraStreamingService : LifecycleService() {
                 }
                 cameraProvider.unbindAll()
                 val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-                // Prefer 60 FPS where this camera/resolution combination supports it.
-                // CameraX falls back to a supported configuration instead of forcing 60 FPS.
-                val sessionConfig = SessionConfig.Builder(analysis)
-                    .setPreferredFeatureGroup(FPS_60)
-                    .build()
+                // Query CameraX for frame-rate ranges guaranteed for this exact analysis
+                // session and selected resolution. Prefer a 120 FPS range, then gracefully
+                // fall back to the highest supported range up to 120 FPS.
+                val baseSessionConfig = SessionConfig.Builder(analysis).build()
+                val cameraInfo = cameraProvider.getCameraInfo(selector)
+                val supportedRanges = cameraInfo.getSupportedFrameRateRanges(baseSessionConfig)
+                val selectedRange = supportedRanges
+                    .filter { it.upper == 120 }
+                    .maxByOrNull { it.lower }
+                    ?: supportedRanges
+                        .filter { it.upper in 61..119 }
+                        .maxByOrNull { it.upper }
+                    ?: supportedRanges
+                        .filter { it.upper <= 60 }
+                        .maxByOrNull { it.upper }
+
+                val sessionConfig = if (selectedRange != null) {
+                    SessionConfig.Builder(analysis)
+                        .setFrameRateRange(selectedRange)
+                        .build()
+                } else {
+                    // Let CameraX choose its normal default if no guaranteed range is exposed.
+                    baseSessionConfig
+                }
+                streamTargetFps = selectedRange?.upper ?: 0
+                streamFpsRange = selectedRange?.let { "${it.lower}-${it.upper}" } ?: "auto"
                 activeCamera = cameraProvider.bindToLifecycle(this, selector, sessionConfig)
                 torchEnabled = false
             } catch (_: Exception) {
@@ -444,6 +465,8 @@ class CameraStreamingService : LifecycleService() {
         streamBitrateMbps = 0.0
         streamFrameWidth = 0
         streamFrameHeight = 0
+        streamTargetFps = 0
+        streamFpsRange = "auto"
         super.onDestroy()
     }
 
@@ -460,11 +483,14 @@ class CameraStreamingService : LifecycleService() {
         @Volatile var streamFrameWidth: Int = 0
         @Volatile var streamFrameHeight: Int = 0
         @Volatile var streamJpegQuality: Int = 75
+        @Volatile var streamTargetFps: Int = 0
+        @Volatile var streamFpsRange: String = "auto"
         fun statsJsonForViewer(): String = String.format(
             java.util.Locale.US,
-            "{\"fps\":%.1f,\"encodeMs\":%.2f,\"bitrateMbps\":%.2f,\"width\":%d,\"height\":%d,\"jpegQuality\":%d}",
+            "{\"fps\":%.1f,\"encodeMs\":%.2f,\"bitrateMbps\":%.2f,\"width\":%d,\"height\":%d,\"jpegQuality\":%d,\"targetFps\":%d,\"fpsRange\":\"%s\"}",
             streamFps, streamEncodeMs, streamBitrateMbps,
-            streamFrameWidth, streamFrameHeight, streamJpegQuality
+            streamFrameWidth, streamFrameHeight, streamJpegQuality,
+            streamTargetFps, streamFpsRange
         )
         private const val NOTIFICATION_ID = 812
     }

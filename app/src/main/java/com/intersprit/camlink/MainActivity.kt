@@ -189,7 +189,7 @@ class MainActivity : ComponentActivity() {
         function pollFrame(){
             clearTimeout(frameTimer);
             if(document.hidden){frameTimer=setTimeout(pollFrame,150);return;}
-            feed.onload=()=>{frameTimer=setTimeout(pollFrame,16);};
+            feed.onload=()=>{frameTimer=setTimeout(pollFrame,1000/120);};
             feed.onerror=()=>{frameTimer=setTimeout(pollFrame,700);};
             feed.src='http://127.0.0.1:8080/frame?t='+Date.now();
         }
@@ -566,7 +566,7 @@ $('performance').onclick=async()=>{ $('resolution').value='1';$('jpeg').value='7
         function pollFrame(){
             clearTimeout(frameTimer);
             if(document.hidden){frameTimer=setTimeout(pollFrame,150);return;}
-            feed.onload=()=>{$('badge').textContent='LIVE';$('status').textContent='Live · frame polling';frameTimer=setTimeout(pollFrame,16);};
+            feed.onload=()=>{$('badge').textContent='LIVE';$('status').textContent='Live · frame polling';frameTimer=setTimeout(pollFrame,1000/120);};
             feed.onerror=()=>{$('badge').textContent='WAITING';$('status').textContent='Frame unavailable. Check that camera sharing is active.';frameTimer=setTimeout(pollFrame,700);};
             feed.src='http://$host:8080/frame?t='+Date.now();
         }
@@ -732,7 +732,7 @@ let frameTimer=null;
 function pollFrame(){
   clearTimeout(frameTimer);
   if(document.hidden){frameTimer=setTimeout(pollFrame,150);return;}
-  feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · frame polling';frameTimer=setTimeout(pollFrame,16);};
+  feed.onload=()=>{badge.textContent='LIVE';status.textContent='Live · frame polling';frameTimer=setTimeout(pollFrame,1000/120);};
   feed.onerror=()=>{badge.textContent='WAITING';status.textContent='Frame unavailable. Check that sharing is started.';frameTimer=setTimeout(pollFrame,700);};
   feed.src='/frame?t='+Date.now();
 }
