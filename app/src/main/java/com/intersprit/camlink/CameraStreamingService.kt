@@ -11,15 +11,22 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaCodecList
+import android.media.MediaFormat
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.view.Surface
 import android.util.Range
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
 import androidx.camera.core.SessionConfig
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.camera2.interop.Camera2CameraControl
@@ -52,6 +59,17 @@ class CameraStreamingService : LifecycleService() {
     // Favor smoothness and lower CPU/network cost by default; higher capture modes remain selectable.
     @Volatile private var resolutionIndex = 1
     @Volatile private var lensFacing = CameraSelector.LENS_FACING_BACK
+
+    // H.264 path: CameraX Preview feeds a hardware MediaCodec input Surface.
+    // Encoded Annex-B access units are streamed from /h264; /frame remains the JPEG fallback.
+    @Volatile private var h264TestEnabled = false
+    @Volatile private var h264Encoder: MediaCodec? = null
+    @Volatile private var h264InputSurface: Surface? = null
+    @Volatile private var h264EncoderThread: HandlerThread? = null
+    private var h264Preview: Preview? = null
+    private var h264StatsWindowStartedNs = System.nanoTime()
+    private var h264StatsWindowFrames = 0L
+    private var h264StatsWindowBytes = 0L
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
@@ -183,12 +201,17 @@ class CameraStreamingService : LifecycleService() {
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_NV21)
                     .setTargetResolution(targetSize)
                     .build()
+                val encoderPreview = if (h264TestEnabled) h264Preview else null
                 analysis.setAnalyzer(cameraExecutor) { image ->
                     val startedNs = System.nanoTime()
                     try {
-                        val jpeg = imageToJpeg(image)
-                        latestJpeg.set(jpeg)
-                        updateStreamMetrics(jpeg.size, System.nanoTime() - startedNs)
+                        // MediaCodec receives camera frames directly through its Surface.
+                        // Avoid the expensive parallel JPEG conversion while H.264 is active.
+                        if (!h264TestEnabled) {
+                            val jpeg = imageToJpeg(image)
+                            latestJpeg.set(jpeg)
+                            updateStreamMetrics(jpeg.size, System.nanoTime() - startedNs)
+                        }
                     } catch (_: Exception) {
                     } finally {
                         image.close()
@@ -199,7 +222,11 @@ class CameraStreamingService : LifecycleService() {
                 // Query CameraX for frame-rate ranges guaranteed for this exact analysis
                 // session and selected resolution. Prefer a 120 FPS range, then gracefully
                 // fall back to the highest supported range up to 120 FPS.
-                val baseSessionConfig = SessionConfig.Builder(analysis).build()
+                val baseSessionConfig = if (encoderPreview != null) {
+                    SessionConfig.Builder(analysis, encoderPreview).build()
+                } else {
+                    SessionConfig.Builder(analysis).build()
+                }
                 val cameraInfo = cameraProvider.getCameraInfo(selector)
                 val supportedRanges = cameraInfo.getSupportedFrameRateRanges(baseSessionConfig)
                 val selectedRange = supportedRanges
@@ -212,10 +239,13 @@ class CameraStreamingService : LifecycleService() {
                         .filter { it.upper <= 60 }
                         .maxByOrNull { it.upper }
 
-                val sessionConfig = if (selectedRange != null) {
+                val sessionBuilder = if (encoderPreview != null) {
+                    SessionConfig.Builder(analysis, encoderPreview)
+                } else {
                     SessionConfig.Builder(analysis)
-                        .setFrameRateRange(selectedRange)
-                        .build()
+                }
+                val sessionConfig = if (selectedRange != null) {
+                    sessionBuilder.setFrameRateRange(selectedRange).build()
                 } else {
                     // Let CameraX choose its normal default if no guaranteed range is exposed.
                     baseSessionConfig
@@ -224,8 +254,17 @@ class CameraStreamingService : LifecycleService() {
                 streamFpsRange = selectedRange?.let { "${it.lower}-${it.upper}" } ?: "auto"
                 activeCamera = cameraProvider.bindToLifecycle(this, selector, sessionConfig)
                 torchEnabled = false
-            } catch (_: Exception) {
-                stopSelf()
+            } catch (e: Exception) {
+                if (h264TestEnabled) {
+                    streamH264Error = e.message ?: "Camera could not attach the H.264 encoder surface"
+                    h264TestEnabled = false
+                    try { provider?.unbindAll() } catch (_: Exception) { }
+                    stopH264Encoder()
+                    h264Preview = null
+                    startCamera()
+                } else {
+                    stopSelf()
+                }
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -312,11 +351,259 @@ class CameraStreamingService : LifecycleService() {
                     jpegQuality = requested.coerceIn(50, 95)
                     "JPEG quality set to $jpegQuality%"
                 }
+                "h264test" -> {
+                    val enabled = when (value?.lowercase()) {
+                        "on", "true", "1" -> true
+                        "off", "false", "0" -> false
+                        else -> return "Use h264test value=on or value=off"
+                    }
+                    ContextCompat.getMainExecutor(this).execute { setH264TestEnabled(enabled) }
+                    if (enabled) {
+                        "Starting experimental hardware H.264 encoder test. Check /stats for results."
+                    } else {
+                        "Stopping experimental H.264 encoder test."
+                    }
+                }
                 else -> "Unknown command"
             }
         } catch (e: Exception) {
             "Control failed: ${e.message ?: "camera may not support this setting"}"
         }
+    }
+
+    private fun setH264TestEnabled(enabled: Boolean) {
+        if (enabled == h264TestEnabled) return
+
+        if (enabled) {
+            try {
+                val requestedSize = arrayOf(
+                    android.util.Size(640, 480),
+                    android.util.Size(1280, 720),
+                    android.util.Size(1920, 1080),
+                    android.util.Size(2560, 1440),
+                    android.util.Size(3840, 2160)
+                )[resolutionIndex.coerceIn(0, 4)]
+                h264Preview = createH264EncoderPreview(requestedSize)
+                h264TestEnabled = true
+                streamH264Enabled = true
+                streamH264Error = ""
+                startCamera()
+            } catch (e: Exception) {
+                h264TestEnabled = false
+                stopH264Encoder()
+                streamH264Error = e.message ?: "Could not start hardware H.264 encoder"
+            }
+        } else {
+            h264TestEnabled = false
+            try { provider?.unbindAll() } catch (_: Exception) { }
+            stopH264Encoder()
+            h264Preview = null
+            streamH264Error = ""
+            startCamera()
+        }
+    }
+
+    private fun createH264EncoderPreview(requestedSize: android.util.Size): Preview {
+        val mime = MediaFormat.MIMETYPE_VIDEO_AVC
+        val codecInfos = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { info ->
+                info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) }
+            }
+
+        val candidateSizes = listOf(
+            requestedSize,
+            android.util.Size(1280, 720),
+            android.util.Size(640, 480)
+        ).distinct()
+        data class EncoderChoice(
+            val info: MediaCodecInfo,
+            val size: android.util.Size,
+            val frameRate: Int,
+            val hardware: Boolean
+        )
+
+        val choices = mutableListOf<EncoderChoice>()
+        for (size in candidateSizes) {
+            for (info in codecInfos) {
+                val hardware = if (Build.VERSION.SDK_INT >= 29) {
+                    info.isHardwareAccelerated
+                } else {
+                    val name = info.name.lowercase()
+                    !name.startsWith("omx.google.") &&
+                        !name.startsWith("c2.android.") &&
+                        !name.contains("software")
+                }
+                if (!hardware) continue
+
+                val videoCapabilities = try {
+                    info.getCapabilitiesForType(mime).videoCapabilities
+                } catch (_: Exception) {
+                    null
+                } ?: continue
+                val supportedRate = when {
+                    try { videoCapabilities.areSizeAndRateSupported(size.width, size.height, 30.0) } catch (_: Exception) { false } -> 30
+                    try { videoCapabilities.areSizeAndRateSupported(size.width, size.height, 15.0) } catch (_: Exception) { false } -> 15
+                    else -> 0
+                }
+                if (supportedRate > 0) {
+                    choices.add(EncoderChoice(info, size, supportedRate, hardware))
+                }
+            }
+            if (choices.isNotEmpty()) break
+        }
+
+        val choice = choices.firstOrNull()
+            ?: throw IllegalStateException(
+                "No hardware AVC encoder supports ${requestedSize.width}x${requestedSize.height}, 720p, or 480p"
+            )
+        val targetBitrate = when {
+            choice.size.width >= 3840 -> 20_000_000
+            choice.size.width >= 2560 -> 12_000_000
+            choice.size.width >= 1920 -> 8_000_000
+            choice.size.width >= 1280 -> 4_000_000
+            else -> 1_500_000
+        }
+        val format = MediaFormat.createVideoFormat(mime, choice.size.width, choice.size.height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, targetBitrate)
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+            setInteger(MediaFormat.KEY_FRAME_RATE, choice.frameRate)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        }
+
+        val codec = MediaCodec.createByCodecName(choice.info.name)
+        val callbackThread = HandlerThread("CamLinkH264Encoder").apply { start() }
+        try {
+            codec.setCallback(object : MediaCodec.Callback() {
+                override fun onInputBufferAvailable(codec: MediaCodec, index: Int) = Unit
+
+                override fun onOutputBufferAvailable(
+                    codec: MediaCodec,
+                    index: Int,
+                    info: MediaCodec.BufferInfo
+                ) {
+                    try {
+                        if (info.size > 0) {
+                            val output = codec.getOutputBuffer(index)
+                            if (output != null) {
+                                val sample = output.duplicate().apply {
+                                    position(info.offset)
+                                    limit(info.offset + info.size)
+                                }
+                                val bytes = ByteArray(sample.remaining())
+                                sample.get(bytes)
+                                if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                                    H264StreamHub.publishCodecConfig(bytes)
+                                } else {
+                                    H264StreamHub.publishAccessUnit(bytes)
+                                    updateH264Metrics(info.size, info.presentationTimeUs)
+                                }
+                            }
+                        }
+                    } finally {
+                        try { codec.releaseOutputBuffer(index, false) } catch (_: Exception) { }
+                    }
+                }
+
+                override fun onError(codec: MediaCodec, exception: MediaCodec.CodecException) {
+                    streamH264Error = exception.message ?: "Hardware H.264 encoder failed"
+                }
+
+                override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+                    H264StreamHub.publishCodecConfig(
+                        copyCodecBuffer(format.getByteBuffer("csd-0")),
+                        copyCodecBuffer(format.getByteBuffer("csd-1"))
+                    )
+                }
+            }, Handler(callbackThread.looper))
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val inputSurface = codec.createInputSurface()
+            H264StreamHub.start()
+            codec.start()
+
+            h264Encoder = codec
+            h264InputSurface = inputSurface
+            h264EncoderThread = callbackThread
+            streamH264Codec = choice.info.name
+            streamH264Hardware = choice.hardware
+            streamH264Width = choice.size.width
+            streamH264Height = choice.size.height
+            streamH264TargetFps = choice.frameRate
+            streamH264Fps = 0.0
+            streamH264BitrateMbps = 0.0
+            streamH264AverageFrameKb = 0.0
+            streamH264LatencyMs = 0.0
+            h264StatsWindowStartedNs = System.nanoTime()
+            h264StatsWindowFrames = 0L
+            h264StatsWindowBytes = 0L
+        } catch (e: Exception) {
+            try { codec.stop() } catch (_: Exception) { }
+            try { codec.release() } catch (_: Exception) { }
+            callbackThread.quitSafely()
+            throw e
+        }
+
+        return Preview.Builder()
+            .setTargetResolution(choice.size)
+            .build()
+            .also { preview ->
+                preview.setSurfaceProvider(ContextCompat.getMainExecutor(this)) { request ->
+                    val surface = h264InputSurface
+                    if (surface == null) {
+                        request.willNotProvideSurface()
+                    } else {
+                        request.provideSurface(surface, ContextCompat.getMainExecutor(this)) { }
+                    }
+                }
+            }
+    }
+
+    private fun copyCodecBuffer(buffer: java.nio.ByteBuffer?): ByteArray? {
+        if (buffer == null) return null
+        val duplicate = buffer.duplicate()
+        return ByteArray(duplicate.remaining()).also { duplicate.get(it) }
+    }
+
+    private fun updateH264Metrics(encodedBytes: Int, presentationTimeUs: Long) {
+        h264StatsWindowFrames++
+        h264StatsWindowBytes += encodedBytes
+        if (presentationTimeUs > 0L) {
+            val ageMs = (System.nanoTime() / 1000.0 - presentationTimeUs) / 1000.0
+            if (ageMs in 0.0..5000.0) streamH264LatencyMs = ageMs
+        }
+
+        val now = System.nanoTime()
+        val elapsedNs = now - h264StatsWindowStartedNs
+        if (elapsedNs >= 1_000_000_000L) {
+            streamH264Fps = h264StatsWindowFrames * 1_000_000_000.0 / elapsedNs
+            streamH264BitrateMbps = h264StatsWindowBytes * 8_000.0 / elapsedNs
+            streamH264AverageFrameKb =
+                if (h264StatsWindowFrames > 0) h264StatsWindowBytes / h264StatsWindowFrames / 1024.0 else 0.0
+            h264StatsWindowFrames = 0L
+            h264StatsWindowBytes = 0L
+            h264StatsWindowStartedNs = now
+        }
+    }
+
+    private fun stopH264Encoder() {
+        H264StreamHub.stop()
+        val codec = h264Encoder
+        h264Encoder = null
+        h264InputSurface = null
+        try { codec?.stop() } catch (_: Exception) { }
+        try { codec?.release() } catch (_: Exception) { }
+        h264EncoderThread?.quitSafely()
+        h264EncoderThread = null
+        streamH264Enabled = false
+        streamH264Codec = ""
+        streamH264Hardware = false
+        streamH264Width = 0
+        streamH264Height = 0
+        streamH264TargetFps = 0
+        streamH264Fps = 0.0
+        streamH264BitrateMbps = 0.0
+        streamH264AverageFrameKb = 0.0
+        streamH264LatencyMs = 0.0
     }
 
     private fun imageToJpeg(image: androidx.camera.core.ImageProxy): ByteArray {
@@ -460,6 +747,9 @@ class CameraStreamingService : LifecycleService() {
         try { server?.stop() } catch (_: Exception) { }
         cameraExecutor.shutdown()
         latestJpeg.set(null)
+        stopH264Encoder()
+        h264TestEnabled = false
+        h264Preview = null
         streamFps = 0.0
         streamEncodeMs = 0.0
         streamBitrateMbps = 0.0
@@ -485,12 +775,30 @@ class CameraStreamingService : LifecycleService() {
         @Volatile var streamJpegQuality: Int = 75
         @Volatile var streamTargetFps: Int = 0
         @Volatile var streamFpsRange: String = "auto"
+        @Volatile var streamH264Enabled: Boolean = false
+        @Volatile var streamH264Fps: Double = 0.0
+        @Volatile var streamH264BitrateMbps: Double = 0.0
+        @Volatile var streamH264AverageFrameKb: Double = 0.0
+        @Volatile var streamH264LatencyMs: Double = 0.0
+        @Volatile var streamH264Codec: String = ""
+        @Volatile var streamH264Hardware: Boolean = false
+        @Volatile var streamH264Width: Int = 0
+        @Volatile var streamH264Height: Int = 0
+        @Volatile var streamH264TargetFps: Int = 0
+        @Volatile var streamH264Error: String = ""
+
+        private fun jsonEscape(value: String): String =
+            value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")
+
         fun statsJsonForViewer(): String = String.format(
             java.util.Locale.US,
-            "{\"fps\":%.1f,\"encodeMs\":%.2f,\"bitrateMbps\":%.2f,\"width\":%d,\"height\":%d,\"jpegQuality\":%d,\"targetFps\":%d,\"fpsRange\":\"%s\"}",
+            "{\"fps\":%.1f,\"encodeMs\":%.2f,\"bitrateMbps\":%.2f,\"width\":%d,\"height\":%d,\"jpegQuality\":%d,\"targetFps\":%d,\"fpsRange\":\"%s\",\"h264TestEnabled\":%b,\"h264Fps\":%.1f,\"h264BitrateMbps\":%.2f,\"h264AverageFrameKb\":%.2f,\"h264LatencyMs\":%.2f,\"h264Codec\":\"%s\",\"h264Hardware\":%b,\"h264Width\":%d,\"h264Height\":%d,\"h264TargetFps\":%d,\"h264Error\":\"%s\"}",
             streamFps, streamEncodeMs, streamBitrateMbps,
             streamFrameWidth, streamFrameHeight, streamJpegQuality,
-            streamTargetFps, streamFpsRange
+            streamTargetFps, streamFpsRange, streamH264Enabled, streamH264Fps,
+            streamH264BitrateMbps, streamH264AverageFrameKb, streamH264LatencyMs,
+            jsonEscape(streamH264Codec), streamH264Hardware, streamH264Width,
+            streamH264Height, streamH264TargetFps, jsonEscape(streamH264Error)
         )
         private const val NOTIFICATION_ID = 812
     }

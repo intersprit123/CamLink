@@ -76,6 +76,37 @@ check("camera reports its negotiated FPS target and actual frame rate",
       "streamFps, streamEncodeMs" in SERVICE)
 check("CameraX discards stale analysis frames",
       "ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST" in SERVICE)
+
+# Experimental H.264 hardware-encoder measurement path.
+check("H.264 benchmark can be toggled through /control",
+      '"h264test" ->' in SERVICE and "setH264TestEnabled(enabled)" in SERVICE)
+check("H.264 test selects an AVC hardware encoder",
+      "MediaFormat.MIMETYPE_VIDEO_AVC" in SERVICE and
+      "info.isHardwareAccelerated" in SERVICE and
+      "MediaCodec.createByCodecName" in SERVICE)
+check("H.264 test uses a MediaCodec input Surface",
+      "MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface" in SERVICE and
+      "codec.createInputSurface()" in SERVICE)
+check("CameraX binds the encoder Preview and JPEG analyzer together",
+      "SessionConfig.Builder(analysis, encoderPreview)" in SERVICE and
+      "Preview.Builder()" in SERVICE)
+check("MediaCodec H.264 access units are published to the bounded stream hub",
+      "H264StreamHub.publishAccessUnit(bytes)" in SERVICE and
+      "H264StreamHub.publishCodecConfig(" in SERVICE and
+      "LinkedBlockingDeque<ByteArray>" in (ROOT / "app/src/main/java/com/intersprit/camlink/H264StreamHub.kt").read_text(encoding="utf-8"))
+check("HTTP exposes the continuous Annex-B H.264 endpoint",
+      '"/h264" ->' in MAIN and '"video/h264"' in MAIN and
+      "H264StreamHub.openStream()" in MAIN)
+check("H.264 mode avoids simultaneous full-rate JPEG conversion",
+      "if (!h264TestEnabled)" in SERVICE and "imageToJpeg(image)" in SERVICE)
+check("H.264 encoder output metrics are exposed through /stats",
+      "h264Fps" in SERVICE and "h264BitrateMbps" in SERVICE and
+      "h264AverageFrameKb" in SERVICE and "h264LatencyMs" in SERVICE)
+check("H.264 experiment leaves the existing JPEG /frame pipeline intact",
+      "latestJpeg.set(jpeg)" in SERVICE and
+      '"image/jpeg"' in frame_route and "latestFrame.get()" in frame_route)
+
+
 check("remote viewer enables CORS for canvas snapshots", 'crossorigin="anonymous"' in remote_viewer and
       'crossorigin="anonymous"' in embedded_viewer)
 check("server retains /stream only as a compatibility endpoint", '"/stream" ->' in MAIN)
